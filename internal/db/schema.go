@@ -1,0 +1,385 @@
+// Package db provides all database operations for cmonit.
+//
+// This package handles:
+// - Database initialization and schema creation
+// - Storing host information from Monit agents
+// - Storing service status data
+// - Storing time-series metrics
+// - Storing events (state changes)
+//
+// Database Technology: SQLite
+// - Embedded database (no separate server needed)
+// - File-based (stored in cmonit.db)
+// - ACID compliant (Atomicity, Consistency, Isolation, Durability)
+// - Perfect for small-to-medium deployments (<100 hosts)
+//
+// Thread Safety:
+// - The database/sql package provides connection pooling
+// - Safe to use from multiple goroutines (concurrent HTTP requests)
+package db
+
+import (
+	// Standard library imports
+
+	"database/sql" // SQL database interface (works with any SQL database)
+	"fmt"          // Formatted I/O
+	"log"          // Logging
+
+	// Third-party imports
+	// The underscore (_) means "import for side effects only"
+	// We don't use the sqlite3 package directly, but importing it
+	// registers the SQLite driver with database/sql
+	//
+	// This is Go's way of plugin-style architecture:
+	// - database/sql provides the interface
+	// - mattn/go-sqlite3 provides the SQLite implementation
+	// - The registration happens automatically when imported
+	_ "github.com/mattn/go-sqlite3"
+)
+
+// SQL schema for the cmonit database
+//
+// This schema is designed to:
+// 1. Store current status of all hosts and services
+// 2. Keep historical metrics for graphing
+// 3. Record events (state changes)
+//
+// Why these tables?
+// - hosts: One row per Monit agent
+// - services: One row per monitored service (per host)
+// - metrics: Time-series data for graphing (many rows per service)
+// - events: State changes (service failed, recovered, etc.)
+const (
+	// createHostsTable creates the hosts table
+	//
+	// This table stores information about each monitored server/machine.
+	// Each server runs a Monit agent that reports to cmonit.
+	//
+	// Columns:
+	//   - id: Unique identifier from Monit (stays same even if hostname changes)
+	//   - hostname: Human-readable server name (e.g., "web-server-01")
+	//   - incarnation: Unix timestamp when Monit was started (changes on restart)
+	//   - version: Monit version string (e.g., "5.35.2")
+	//   - last_seen: When we last received data from this host
+	//   - created_at: When we first saw this host
+	//
+	// PRIMARY KEY: id must be unique (enforced by SQLite)
+	// UNIQUE: hostname must be unique (one entry per server)
+	//
+	// DEFAULT CURRENT_TIMESTAMP: Automatically sets time fields to "now"
+	createHostsTable = `
+	CREATE TABLE IF NOT EXISTS hosts (
+		id TEXT PRIMARY KEY,
+		hostname TEXT NOT NULL,
+		incarnation INTEGER,
+		version TEXT,
+		last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(hostname)
+	);`
+
+	// createServicesTable creates the services table
+	//
+	// This table stores information about each monitored service.
+	// Services are things like: system stats, processes, filesystems, etc.
+	//
+	// Columns:
+	//   - id: Auto-incrementing integer (SQLite generates unique IDs)
+	//   - host_id: Which host this service belongs to (foreign key to hosts.id)
+	//   - name: Service name (e.g., "nginx", "system", "disk-root")
+	//   - type: Service type integer from Monit (0=filesystem, 1=directory, 2=file,
+	//           3=process, 4=host, 5=system, 6=fifo, 7=program, 8=net)
+	//   - status: Current status (0=running/ok, 1=failed, etc.)
+	//   - monitor: Monitoring mode (0=not monitored, 1=monitored, 2=init)
+	//   - collected_at: When this status was collected by Monit
+	//   - last_seen: When we last received an update for this service
+	//
+	// INTEGER PRIMARY KEY AUTOINCREMENT: SQLite automatically generates unique IDs
+	// FOREIGN KEY: host_id must reference a valid host.id (referential integrity)
+	// UNIQUE(host_id, name): Each service name must be unique per host
+	//
+	// Why AUTOINCREMENT?
+	// - We don't have a natural primary key for services
+	// - Each service is identified by (host_id, name) combination
+	// - AUTOINCREMENT gives us a simple numeric ID for relationships
+	createServicesTable = `
+	CREATE TABLE IF NOT EXISTS services (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		host_id TEXT NOT NULL,
+		name TEXT NOT NULL,
+		type INTEGER,
+		status INTEGER,
+		monitor INTEGER,
+		collected_at DATETIME,
+		last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (host_id) REFERENCES hosts(id),
+		UNIQUE(host_id, name)
+	);`
+
+	// createMetricsTable creates the metrics table (time-series data)
+	//
+	// This is the largest table - it stores historical metrics for graphing.
+	// Every 30 seconds (or whatever interval Monit is configured for),
+	// we insert new metrics for each service.
+	//
+	// Columns:
+	//   - id: Auto-incrementing integer
+	//   - host_id: Which host this metric is from
+	//   - service_name: Which service this metric is for
+	//   - metric_type: Category of metric (e.g., "cpu", "memory", "disk")
+	//   - metric_name: Specific metric (e.g., "user", "system", "percent")
+	//   - value: The numeric value
+	//   - collected_at: When Monit collected this data point
+	//
+	// Example rows:
+	//   host123 | system | cpu     | user    | 15.2 | 2025-11-22 20:30:00
+	//   host123 | system | cpu     | system  | 8.1  | 2025-11-22 20:30:00
+	//   host123 | system | memory  | percent | 45.6 | 2025-11-22 20:30:00
+	//
+	// Indexes:
+	// - idx_metrics_lookup: Fast queries by (host, service, metric, time)
+	// - idx_metrics_time: Fast queries by time (for cleanup)
+	//
+	// Why two indexes?
+	// - Lookups are for graphing (show CPU for host X from time A to B)
+	// - Time index is for deleting old data (cleanup metrics older than 30 days)
+	createMetricsTable = `
+	CREATE TABLE IF NOT EXISTS metrics (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		host_id TEXT NOT NULL,
+		service_name TEXT NOT NULL,
+		metric_type TEXT NOT NULL,
+		metric_name TEXT NOT NULL,
+		value REAL NOT NULL,
+		collected_at DATETIME NOT NULL,
+		FOREIGN KEY (host_id) REFERENCES hosts(id)
+	);`
+
+	// createMetricsIndexes creates indexes for fast metrics queries
+	//
+	// Indexes are like a book's index - they help find data quickly.
+	// Without indexes, SQLite must scan every row (slow for large tables).
+	// With indexes, SQLite can jump directly to relevant rows (fast!).
+	//
+	// Trade-offs:
+	// - Faster queries (good!)
+	// - Slower inserts (needs to update index - but still fast enough)
+	// - More disk space (index takes space - but worth it)
+	//
+	// idx_metrics_lookup: Optimizes queries like:
+	//   "Show me CPU metrics for host123's system service from 1pm to 2pm"
+	//
+	// idx_metrics_time: Optimizes queries like:
+	//   "Delete all metrics older than 30 days"
+	createMetricsIndexes = `
+	CREATE INDEX IF NOT EXISTS idx_metrics_lookup
+		ON metrics(host_id, service_name, metric_type, metric_name, collected_at);
+	CREATE INDEX IF NOT EXISTS idx_metrics_time
+		ON metrics(collected_at);`
+
+	// createEventsTable creates the events table
+	//
+	// Events are state changes: service failed, recovered, started, stopped, etc.
+	// These are used for:
+	// - Alerting (send email when service fails)
+	// - Audit trail (what happened when?)
+	// - Debugging (why did this service restart?)
+	//
+	// Columns:
+	//   - id: Auto-incrementing integer
+	//   - host_id: Which host this event is from
+	//   - service_name: Which service this event is for
+	//   - event_type: Type of event (integer from Monit)
+	//   - message: Human-readable description
+	//   - created_at: When the event occurred
+	//
+	// Index:
+	// - idx_events_time: Fast queries for recent events
+	//
+	// Events are inserted but rarely updated (append-only table).
+	createEventsTable = `
+	CREATE TABLE IF NOT EXISTS events (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		host_id TEXT NOT NULL,
+		service_name TEXT NOT NULL,
+		event_type INTEGER,
+		message TEXT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (host_id) REFERENCES hosts(id)
+	);`
+
+	// createEventsIndex creates index for fast event queries
+	//
+	// We usually query events in reverse chronological order:
+	// "Show me the 50 most recent events"
+	//
+	// DESC means descending order (newest first)
+	createEventsIndex = `
+	CREATE INDEX IF NOT EXISTS idx_events_time
+		ON events(created_at DESC);`
+)
+
+// InitDB initializes the database and creates all tables.
+//
+// This function:
+// 1. Opens a connection to the SQLite database file
+// 2. Creates tables if they don't exist
+// 3. Creates indexes for performance
+// 4. Returns a connection that can be used throughout the application
+//
+// Parameters:
+//   - dbPath: Path to the database file (e.g., "cmonit.db")
+//
+// Returns:
+//   - *sql.DB: Database connection (use this for all queries)
+//   - error: nil if successful, error describing problem if failed
+//
+// Important Notes:
+// - If the database file doesn't exist, SQLite creates it automatically
+// - IF NOT EXISTS: Safe to call multiple times (won't fail if tables exist)
+// - The returned *sql.DB is a connection pool, not a single connection
+// - It's safe to use from multiple goroutines (thread-safe)
+// - You should call defer db.Close() in main() to clean up when shutting down
+func InitDB(dbPath string) (*sql.DB, error) {
+	// Open a connection to the SQLite database
+	//
+	// sql.Open() doesn't actually connect to the database yet!
+	// It just validates the driver name and creates a connection pool.
+	// The actual connection happens on the first query.
+	//
+	// Parameters:
+	//   - "sqlite3": The driver name (registered by the import)
+	//   - dbPath: The database file path
+	//
+	// Returns:
+	//   - *sql.DB: A database connection pool
+	//   - error: nil if the driver exists, error if driver not found
+	//
+	// Why "sqlite3"?
+	// - This is the name the driver registered when we imported it
+	// - Different drivers use different names (postgres, mysql, etc.)
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		// Failed to open database
+		// This usually means the SQLite driver isn't available
+		// or there's a problem with the file path
+		return nil, fmt.Errorf("failed to open database: %w", err)
+	}
+
+	// Test the connection by pinging the database
+	//
+	// db.Ping() actually tries to connect to the database.
+	// This verifies:
+	// - The database file can be accessed
+	// - The file is a valid SQLite database
+	// - We have read/write permissions
+	//
+	// Why ping?
+	// - sql.Open() doesn't actually connect (lazy initialization)
+	// - We want to fail early if there's a problem
+	// - Better to find out now than on the first query
+	err = db.Ping()
+	if err != nil {
+		// Failed to connect to database
+		// This could mean:
+		// - File permissions problem
+		// - Corrupt database file
+		// - Disk full
+		db.Close() // Clean up the connection pool
+		return nil, fmt.Errorf("failed to ping database: %w", err)
+	}
+
+	log.Printf("[INFO] Connected to database: %s", dbPath)
+
+	// Enable foreign key constraints
+	//
+	// By default, SQLite doesn't enforce foreign keys!
+	// This pragma (special command) enables them.
+	//
+	// With foreign keys enabled:
+	// - Can't insert a service with invalid host_id
+	// - Can't delete a host that has services (referential integrity)
+	//
+	// This prevents data inconsistencies.
+	_, err = db.Exec("PRAGMA foreign_keys = ON;")
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to enable foreign keys: %w", err)
+	}
+
+	// Enable Write-Ahead Logging (WAL) mode
+	//
+	// WAL improves concurrency:
+	// - Readers don't block writers
+	// - Writers don't block readers
+	// - Only writers block other writers
+	//
+	// Default SQLite mode: readers and writers block each other (slow!)
+	// WAL mode: much better for concurrent access (perfect for web servers!)
+	//
+	// Trade-off: Uses two extra files (.db-wal and .db-shm)
+	_, err = db.Exec("PRAGMA journal_mode = WAL;")
+	if err != nil {
+		// WAL not available (very rare)
+		// Log warning but continue (not critical)
+		log.Printf("[WARN] Failed to enable WAL mode: %v", err)
+	}
+
+	// Create all tables
+	//
+	// IF NOT EXISTS means:
+	// - If table exists: do nothing (success)
+	// - If table doesn't exist: create it
+	//
+	// This makes InitDB() idempotent (safe to call multiple times)
+
+	log.Printf("[INFO] Creating database schema...")
+
+	// Create hosts table
+	_, err = db.Exec(createHostsTable)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to create hosts table: %w", err)
+	}
+
+	// Create services table
+	_, err = db.Exec(createServicesTable)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to create services table: %w", err)
+	}
+
+	// Create metrics table
+	_, err = db.Exec(createMetricsTable)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to create metrics table: %w", err)
+	}
+
+	// Create metrics indexes (for fast queries)
+	_, err = db.Exec(createMetricsIndexes)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to create metrics indexes: %w", err)
+	}
+
+	// Create events table
+	_, err = db.Exec(createEventsTable)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to create events table: %w", err)
+	}
+
+	// Create events index
+	_, err = db.Exec(createEventsIndex)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to create events index: %w", err)
+	}
+
+	log.Printf("[INFO] Database schema created successfully")
+
+	// Return the database connection
+	// The caller is responsible for closing it with defer db.Close()
+	return db, nil
+}

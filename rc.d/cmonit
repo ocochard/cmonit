@@ -1,0 +1,82 @@
+#!/bin/sh
+#
+# PROVIDE: cmonit
+# REQUIRE: LOGIN DAEMON NETWORKING
+# KEYWORD: shutdown
+#
+# Add the following lines to /etc/rc.conf to enable cmonit:
+#
+# cmonit_enable (bool):         Set to "NO" by default.
+#                               Set it to "YES" to enable cmonit.
+# cmonit_user (string):         Set user to run cmonit.
+#                               Default is "root".
+# cmonit_collector (string):    Collector listen address.
+#                               Default is ":8080".
+# cmonit_web (string):          Web UI listen address.
+#                               Default is "localhost:3000".
+# cmonit_db (string):           Database file path.
+#                               Default is "/var/run/cmonit/cmonit.db".
+# cmonit_pidfile (string):      PID file path.
+#                               Default is "/var/run/cmonit/cmonit.pid".
+# cmonit_syslog (string):       Syslog facility (daemon, local0-local7).
+#                               Default is "daemon" (use syslog).
+#                               Set to empty "" to log to stderr.
+
+. /etc/rc.subr
+
+name=cmonit
+rcvar=cmonit_enable
+
+load_rc_config $name
+
+: ${cmonit_enable:="NO"}
+: ${cmonit_user:="root"}
+: ${cmonit_collector:=":8080"}
+: ${cmonit_web:="localhost:3000"}
+: ${cmonit_db:="/var/run/cmonit/cmonit.db"}
+: ${cmonit_pidfile:="/var/run/cmonit/cmonit.pid"}
+: ${cmonit_syslog:="daemon"}
+
+pidfile="${cmonit_pidfile}"
+command="/usr/local/bin/${name}"
+command_args="-collector ${cmonit_collector} -web ${cmonit_web} -db ${cmonit_db} -pidfile ${cmonit_pidfile}"
+
+# Add syslog facility if specified
+if [ -n "${cmonit_syslog}" ]; then
+    command_args="${command_args} -syslog ${cmonit_syslog}"
+fi
+
+start_precmd="${name}_prestart"
+
+cmonit_prestart()
+{
+    # Create runtime directory (/var/run/cmonit) if it doesn't exist
+    # This directory holds both the database and PID file
+    runtime_dir="/var/run/cmonit"
+    if [ ! -d "${runtime_dir}" ]; then
+        mkdir -p "${runtime_dir}"
+        chown ${cmonit_user} "${runtime_dir}"
+        chmod 755 "${runtime_dir}"
+    fi
+
+    # Create database directory if it's different from runtime dir
+    db_dir=$(dirname "${cmonit_db}")
+    if [ "${db_dir}" != "${runtime_dir}" ] && [ ! -d "${db_dir}" ]; then
+        mkdir -p "${db_dir}"
+        chown ${cmonit_user} "${db_dir}"
+    fi
+
+    # Ensure database file is writable by cmonit_user
+    if [ -f "${cmonit_db}" ]; then
+        chown ${cmonit_user} "${cmonit_db}"
+    fi
+
+    # Create PID file directory if needed
+    pid_dir=$(dirname "${cmonit_pidfile}")
+    if [ ! -d "${pid_dir}" ]; then
+        mkdir -p "${pid_dir}"
+        chmod 755 "${pid_dir}"
+    fi
+}
+
+run_rc_command "$1"

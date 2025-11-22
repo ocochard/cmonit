@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>cmonit Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <meta http-equiv="refresh" content="300">
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-4xl font-bold text-gray-800 mb-4">cmonit</h1>
+        <p class="text-gray-600 mb-8">Last updated: {{.LastUpdate.Format "2006-01-02 15:04:05"}}</p>
+
+        {{if .Hosts}}
+            {{range $host := .Hosts}}
+            <div class="bg-white rounded-lg shadow-md mb-6">
+                <div class="bg-blue-600 text-white px-6 py-4 rounded-t-lg flex justify-between">
+                    <div>
+                        <h2 class="text-2xl font-semibold">{{$host.Hostname}}</h2>
+                        <p class="text-sm">Monit {{$host.Version}}</p>
+                    </div>
+                    <div>
+                        {{if $host.IsStale}}
+                        <span class="bg-red-500 px-3 py-1 rounded-full text-sm">STALE</span>
+                        {{else}}
+                        <span class="bg-green-500 px-3 py-1 rounded-full text-sm">ACTIVE</span>
+                        {{end}}
+                    </div>
+                </div>
+
+                <div class="px-6 py-4">
+                    {{if $host.Services}}
+                    <table class="min-w-full">
+                        <thead>
+                            <tr class="border-b-2">
+                                <th class="text-left py-2 px-4">Service</th>
+                                <th class="text-left py-2 px-4">Type</th>
+                                <th class="text-left py-2 px-4">Status</th>
+                                <th class="text-left py-2 px-4">Monitor</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {{range $host.Services}}
+                            <tr class="border-b">
+                                <td class="py-2 px-4">{{.Name}}</td>
+                                <td class="py-2 px-4">{{.TypeName}}</td>
+                                <td class="py-2 px-4">
+                                    <span class="px-2 py-1 rounded text-xs {{if eq .Status 0}}bg-green-500{{else if eq .Status 1}}bg-yellow-500{{else}}bg-red-500{{end}} text-white">
+                                        {{.StatusName}}
+                                    </span>
+                                </td>
+                                <td class="py-2 px-4">
+                                    {{if eq .Monitor 1}}Yes{{else}}No{{end}}
+                                </td>
+                            </tr>
+                            {{end}}
+                        </tbody>
+                    </table>
+                    {{else}}
+                    <p class="text-gray-500 text-center py-4">No services</p>
+                    {{end}}
+
+                    <!-- System Metrics Graphs -->
+                    {{range $host.Services}}
+                    {{if eq .Type 5}}
+                    <div class="mt-6">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-lg font-semibold text-gray-800">System Metrics</h3>
+                            <div class="flex gap-2">
+                                <button onclick="changeTimeRange('{{$host.ID}}', '{{.Name}}', '1h')" class="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-sm time-btn" data-range="1h">1h</button>
+                                <button onclick="changeTimeRange('{{$host.ID}}', '{{.Name}}', '6h')" class="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-sm time-btn" data-range="6h">6h</button>
+                                <button onclick="changeTimeRange('{{$host.ID}}', '{{.Name}}', '24h')" class="px-3 py-1 bg-blue-600 text-white rounded text-sm time-btn active" data-range="24h">24h</button>
+                                <button onclick="changeTimeRange('{{$host.ID}}', '{{.Name}}', '7d')" class="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-sm time-btn" data-range="7d">7d</button>
+                                <button onclick="changeTimeRange('{{$host.ID}}', '{{.Name}}', '30d')" class="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-sm time-btn" data-range="30d">30d</button>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div class="bg-gray-50 p-4 rounded">
+                                <h4 class="text-sm font-semibold text-gray-700 mb-2">System Load</h4>
+                                <canvas id="load-chart-{{$host.ID}}" width="400" height="250"></canvas>
+                            </div>
+                            <div class="bg-gray-50 p-4 rounded">
+                                <h4 class="text-sm font-semibold text-gray-700 mb-2">CPU Usage</h4>
+                                <canvas id="cpu-chart-{{$host.ID}}" width="400" height="250"></canvas>
+                            </div>
+                            <div class="bg-gray-50 p-4 rounded">
+                                <h4 class="text-sm font-semibold text-gray-700 mb-2">Memory Usage</h4>
+                                <canvas id="memory-chart-{{$host.ID}}" width="400" height="250"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                    <script>
+                        loadMetrics('{{$host.ID}}', '{{.Name}}', '24h');
+                    </script>
+                    {{end}}
+                    {{end}}
+                </div>
+            </div>
+            {{end}}
+        {{else}}
+            <div class="bg-white rounded-lg shadow-md p-8 text-center">
+                <h3 class="text-lg font-medium">No hosts yet</h3>
+                <p class="text-gray-500">Waiting for Monit agents...</p>
+            </div>
+        {{end}}
+    </div>
+
+    <script>
+    // Global chart instances
+    const charts = {};
+
+    // Fetch metrics data and update charts
+    async function loadMetrics(hostId, service, range) {
+        try {
+            const response = await fetch(`/api/metrics?host_id=${hostId}&service=${service}&range=${range}`);
+            const data = await response.json();
+
+            if (!data.metrics || data.metrics.length === 0) {
+                console.log('No metrics data available');
+                return;
+            }
+
+            // Group metrics by type
+            const metricsByType = {};
+            data.metrics.forEach(metric => {
+                if (!metricsByType[metric.type]) {
+                    metricsByType[metric.type] = {};
+                }
+                metricsByType[metric.type][metric.name] = metric;
+            });
+
+            // Update charts
+            updateLoadChart(hostId, metricsByType.load || {});
+            updateCPUChart(hostId, metricsByType.cpu || {});
+            updateMemoryChart(hostId, metricsByType.memory || {});
+
+        } catch (error) {
+            console.error('Failed to load metrics:', error);
+        }
+    }
+
+    // Update load average chart
+    function updateLoadChart(hostId, loadMetrics) {
+        const ctx = document.getElementById(`load-chart-${hostId}`);
+        if (!ctx) return;
+
+        const avg01 = loadMetrics.avg01 || { timestamps: [], values: [] };
+        const avg05 = loadMetrics.avg05 || { timestamps: [], values: [] };
+        const avg15 = loadMetrics.avg15 || { timestamps: [], values: [] };
+
+        const chartKey = `load-${hostId}`;
+        if (charts[chartKey]) {
+            charts[chartKey].destroy();
+        }
+
+        charts[chartKey] = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: avg01.timestamps.map(t => new Date(t).toLocaleTimeString()),
+                datasets: [
+                    {
+                        label: '1 min',
+                        data: avg01.values,
+                        borderColor: 'rgb(59, 130, 246)',
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        tension: 0.4
+                    },
+                    {
+                        label: '5 min',
+                        data: avg05.values,
+                        borderColor: 'rgb(16, 185, 129)',
+                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                        tension: 0.4
+                    },
+                    {
+                        label: '15 min',
+                        data: avg15.values,
+                        borderColor: 'rgb(245, 158, 11)',
+                        backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                        tension: 0.4
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: true, position: 'top' }
+                },
+                scales: {
+                    y: { beginAtZero: true, title: { display: true, text: 'Load' } }
+                }
+            }
+        });
+    }
+
+    // Update CPU usage chart
+    function updateCPUChart(hostId, cpuMetrics) {
+        const ctx = document.getElementById(`cpu-chart-${hostId}`);
+        if (!ctx) return;
+
+        const user = cpuMetrics.user || { timestamps: [], values: [] };
+        const system = cpuMetrics.system || { timestamps: [], values: [] };
+
+        const chartKey = `cpu-${hostId}`;
+        if (charts[chartKey]) {
+            charts[chartKey].destroy();
+        }
+
+        charts[chartKey] = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: user.timestamps.map(t => new Date(t).toLocaleTimeString()),
+                datasets: [
+                    {
+                        label: 'User',
+                        data: user.values,
+                        borderColor: 'rgb(239, 68, 68)',
+                        backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                        tension: 0.4
+                    },
+                    {
+                        label: 'System',
+                        data: system.values,
+                        borderColor: 'rgb(168, 85, 247)',
+                        backgroundColor: 'rgba(168, 85, 247, 0.1)',
+                        tension: 0.4
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: true, position: 'top' }
+                },
+                scales: {
+                    y: { beginAtZero: true, max: 100, title: { display: true, text: '%' } }
+                }
+            }
+        });
+    }
+
+    // Update memory usage chart
+    function updateMemoryChart(hostId, memoryMetrics) {
+        const ctx = document.getElementById(`memory-chart-${hostId}`);
+        if (!ctx) return;
+
+        const percent = memoryMetrics.percent || { timestamps: [], values: [] };
+
+        const chartKey = `memory-${hostId}`;
+        if (charts[chartKey]) {
+            charts[chartKey].destroy();
+        }
+
+        charts[chartKey] = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: percent.timestamps.map(t => new Date(t).toLocaleTimeString()),
+                datasets: [
+                    {
+                        label: 'Memory Used',
+                        data: percent.values,
+                        borderColor: 'rgb(34, 197, 94)',
+                        backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                        fill: true,
+                        tension: 0.4
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: true, position: 'top' }
+                },
+                scales: {
+                    y: { beginAtZero: true, max: 100, title: { display: true, text: '%' } }
+                }
+            }
+        });
+    }
+
+    // Change time range
+    function changeTimeRange(hostId, service, range) {
+        // Update button styles
+        document.querySelectorAll('.time-btn').forEach(btn => {
+            if (btn.getAttribute('data-range') === range) {
+                btn.classList.remove('bg-gray-200');
+                btn.classList.add('bg-blue-600', 'text-white');
+            } else {
+                btn.classList.remove('bg-blue-600', 'text-white');
+                btn.classList.add('bg-gray-200');
+            }
+        });
+
+        // Reload metrics with new range
+        loadMetrics(hostId, service, range);
+    }
+    </script>
+</body>
+</html>

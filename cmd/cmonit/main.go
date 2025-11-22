@@ -1,0 +1,740 @@
+// Package main is the entry point for the cmonit application.
+//
+// cmonit (Central Monit) is an open-source M/Monit clone that provides centralized
+// monitoring and management of Monit-enabled hosts through a web interface.
+//
+// This file contains the main() function which:
+// - Initializes the database
+// - Starts the HTTP collector server (receives data from Monit agents)
+// - Starts the web UI server (displays data to users)
+//
+// The application runs two HTTP servers concurrently:
+// - Port 8080: Collector API (receives POST requests from Monit agents)
+// - Port 3000: Web UI (serves HTML pages to users)
+package main
+
+import (
+	// Standard library imports
+	// These are packages built into Go - no need to install separately
+
+	"compress/gzip"  // Gzip compression/decompression
+	"database/sql"   // SQL database interface
+	"flag"           // Command-line flag parsing
+	"fmt"            // Formatted I/O - like printf() in C
+	"io"             // I/O operations
+	"log"            // Logging to stderr with timestamps
+	"log/syslog"     // Syslog support for daemon logging
+	"net/http"       // HTTP client and server functionality
+	"os"             // Operating system functions (exit codes, etc.)
+	"os/signal"      // Signal handling for graceful shutdown
+	"path/filepath"  // File path manipulation
+	"strconv"        // String conversion utilities
+	"strings"        // String manipulation
+	"syscall"        // System call interface (for signal constants)
+
+	// Internal packages (our code)
+	// These are relative to the module path (github.com/ocochard/cmonit)
+	"github.com/ocochard/cmonit/internal/db"     // Database operations
+	"github.com/ocochard/cmonit/internal/parser" // XML parser
+	"github.com/ocochard/cmonit/internal/web"    // Web UI handlers
+)
+
+// Global variable to hold the database connection
+//
+// In Go, variables declared outside functions are "package-level" globals.
+// They're accessible to all functions in the package.
+//
+// Why use a global here?
+// - HTTP handlers don't take custom parameters
+// - We need the database in handleCollector
+// - Alternative: use closures or a struct with methods (more complex)
+//
+// Later we'll refactor to use dependency injection for better testability.
+var globalDB *sql.DB
+
+// main is the entry point of the program
+// Go programs always start execution here
+//
+// This function:
+// 1. Prints a startup message
+// 2. Sets up the HTTP routes (URL paths and their handlers)
+// 3. Starts the HTTP server
+// 4. Waits for termination signals
+//
+// Note: main() doesn't return a value like in C
+// Use os.Exit(code) to return exit codes
+func main() {
+	// Define command-line flags
+	//
+	// flag.String() creates a string flag with:
+	// - name: the flag name (e.g., "-collector")
+	// - default value: used if flag not specified
+	// - description: shown in -h help message
+	//
+	// Returns a *string (pointer to string) that will be set when flag.Parse() runs
+	//
+	// Address format: "host:port" or ":port"
+	// - ":8080" = all interfaces (0.0.0.0 and ::)
+	// - "localhost:8080" = only local connections
+	// - "192.168.1.10:8080" = specific IPv4
+	// - "[::1]:8080" = IPv6 localhost
+	// - "[::]:8080" = all IPv6 interfaces
+	collectorAddr := flag.String("collector", ":8080",
+		"Collector listen address (e.g., :8080, localhost:8080, 0.0.0.0:8080, [::]:8080)")
+
+	webAddr := flag.String("web", "localhost:3000",
+		"Web UI listen address (e.g., localhost:3000, 0.0.0.0:3000, [::]:3000, 192.168.1.10:3000)")
+
+	dbPath := flag.String("db", "/var/run/cmonit/cmonit.db",
+		"Database file path")
+
+	pidFile := flag.String("pidfile", "/var/run/cmonit/cmonit.pid",
+		"PID file path")
+
+	syslogFacility := flag.String("syslog", "",
+		"Syslog facility (daemon, local0-local7, or empty for stderr logging)")
+
+	// Parse command-line flags
+	//
+	// flag.Parse() processes os.Args (command-line arguments)
+	// After this call, *collectorAddr and *webAddr contain the values
+	//
+	// Example usage:
+	//   ./cmonit                              # Use defaults
+	//   ./cmonit -web 0.0.0.0:3000           # Web accessible from anywhere
+	//   ./cmonit -web [::]:3000              # IPv6 all interfaces
+	//   ./cmonit -collector :9000 -web :4000 # Custom ports
+	flag.Parse()
+
+	// Setup syslog if requested
+	//
+	// If -syslog flag is provided, redirect log output to syslog
+	// Otherwise, continue logging to stderr (default)
+	if *syslogFacility != "" {
+		priority, err := parseSyslogFacility(*syslogFacility)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Invalid syslog facility: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Connect to syslog
+		syslogWriter, err := syslog.New(priority, "cmonit")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to connect to syslog: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Redirect log output to syslog
+		log.SetOutput(syslogWriter)
+		log.SetFlags(0) // Syslog adds its own timestamp
+	}
+
+	// Print startup banner
+	// fmt.Println() prints to standard output with a newline
+	fmt.Println("=================================")
+	fmt.Println("cmonit - Central Monit Monitor")
+	fmt.Println("=================================")
+
+	// log.Printf() writes to standard error with a timestamp (or syslog if configured)
+	// Example output: "2025/11/22 21:30:00 [INFO] cmonit starting..."
+	log.Printf("[INFO] cmonit starting...")
+	log.Printf("[INFO] Collector will listen on: %s", *collectorAddr)
+	log.Printf("[INFO] Web UI will listen on: %s", *webAddr)
+	log.Printf("[INFO] Database path: %s", *dbPath)
+	log.Printf("[INFO] PID file: %s", *pidFile)
+
+	// Create database directory if it doesn't exist
+	//
+	// filepath.Dir() extracts the directory path from the full file path
+	// Example: "/var/run/cmonit/cmonit.db" -> "/var/run/cmonit"
+	dbDir := filepath.Dir(*dbPath)
+	if err := os.MkdirAll(dbDir, 0755); err != nil {
+		log.Fatalf("[FATAL] Failed to create database directory %s: %v", dbDir, err)
+	}
+
+	// Create PID file directory if needed
+	pidDir := filepath.Dir(*pidFile)
+	if err := os.MkdirAll(pidDir, 0755); err != nil {
+		log.Fatalf("[FATAL] Failed to create PID file directory %s: %v", pidDir, err)
+	}
+
+	// Write PID file
+	//
+	// os.Getpid() returns the process ID
+	// We write this to a file so other tools (like rc.d scripts) can:
+	// - Check if the process is running
+	// - Send signals to the process (SIGTERM, SIGHUP, etc.)
+	pid := os.Getpid()
+	pidContent := []byte(strconv.Itoa(pid) + "\n")
+	if err := os.WriteFile(*pidFile, pidContent, 0644); err != nil {
+		log.Fatalf("[FATAL] Failed to write PID file: %v", err)
+	}
+	log.Printf("[INFO] PID %d written to %s", pid, *pidFile)
+
+	// Schedule PID file removal on exit
+	defer func() {
+		if err := os.Remove(*pidFile); err != nil {
+			log.Printf("[WARN] Failed to remove PID file: %v", err)
+		}
+	}()
+
+	// Initialize the database
+	//
+	// db.InitDB() does several things:
+	// 1. Opens/creates the cmonit.db file
+	// 2. Creates all tables if they don't exist
+	// 3. Creates indexes for fast queries
+	// 4. Enables foreign key constraints
+	// 5. Enables WAL mode for better concurrency
+	//
+	// Returns:
+	//   - database: A connection pool we can use for queries
+	//   - err: Any error that occurred, or nil if successful
+	//
+	// The connection pool (*sql.DB):
+	// - Manages multiple connections automatically
+	// - Reuses connections (performance)
+	// - Thread-safe (can be used from multiple goroutines)
+	// - Should be created once and reused throughout the application
+	//
+	// *dbPath dereferences the pointer to get the actual string value
+	database, err := db.InitDB(*dbPath)
+	if err != nil {
+		// Failed to initialize database - can't continue
+		// log.Fatalf() prints the error and exits with code 1
+		log.Fatalf("[FATAL] Failed to initialize database: %v", err)
+	}
+
+	// defer schedules a function to run when main() exits
+	// This ensures the database connection is closed cleanly
+	//
+	// Why defer?
+	// - We might exit main() from multiple places (errors, signals, etc.)
+	// - defer guarantees cleanup happens no matter how we exit
+	// - Like "finally" in try/catch/finally, but cleaner
+	//
+	// database.Close():
+	// - Closes all connections in the pool
+	// - Waits for in-flight queries to finish
+	// - Releases file locks on cmonit.db
+	defer database.Close()
+
+	// Store the database connection in the global variable
+	// This makes it accessible to HTTP handlers
+	globalDB = database
+
+	// Initialize HTML templates for the web UI
+	//
+	// web.InitTemplates() does:
+	// 1. Loads all .html files from the templates/ directory
+	// 2. Parses them using Go's html/template package
+	// 3. Caches them for fast rendering
+	//
+	// This must happen before starting the web server
+	err = web.InitTemplates()
+	if err != nil {
+		log.Fatalf("[FATAL] Failed to load templates: %v", err)
+	}
+
+	// Give the web package access to the database
+	//
+	// The web handlers need to query the database to show host/service status
+	// web.SetDB() stores the database connection for use by web handlers
+	web.SetDB(database)
+
+	// Set up HTTP routes (URL patterns and their handler functions)
+	//
+	// http.HandleFunc() registers a handler function for a specific URL pattern
+	// When a request comes in matching the pattern, Go calls the handler function
+	//
+	// Parameters:
+	//   - pattern: URL path (e.g., "/collector")
+	//   - handler: function to call (must have signature: func(http.ResponseWriter, *http.Request))
+	//
+	// The handler function receives:
+	//   - w: ResponseWriter - used to write the HTTP response back to the client
+	//   - r: *Request - contains the incoming request data (method, headers, body, etc.)
+
+	// Register collector endpoint (for Monit agents)
+	http.HandleFunc("/collector", handleCollector)
+
+	// Register web UI routes (for human users)
+	//
+	// We use http.DefaultServeMux for collector routes (port 8080)
+	// We'll create a separate ServeMux for web UI routes (port 3000)
+	//
+	// Why separate muxes?
+	// - Collector needs authentication, web UI might not
+	// - Different ports for different purposes (security, firewall rules)
+	// - Easier to add features to one without affecting the other
+	webMux := http.NewServeMux()
+	webMux.HandleFunc("/", web.HandleDashboard)
+
+	// API endpoints for JavaScript to fetch data
+	//
+	// /api/metrics returns JSON with time-series data
+	// Used by Chart.js to draw graphs
+	webMux.HandleFunc("/api/metrics", web.HandleMetricsAPI)
+
+	// TODO: Add more web routes in Phase 3+
+	// webMux.HandleFunc("/host/", handleHostDetails)
+
+	// Start the collector HTTP server in a goroutine (lightweight thread)
+	//
+	// The "go" keyword runs a function concurrently
+	// This allows the main() function to continue while the server runs
+	// Without "go", ListenAndServe would block forever
+	//
+	// Why use a goroutine?
+	// - We need to run multiple things concurrently (collector + web UI)
+	// - We need main() to continue so we can handle shutdown signals
+	go func() {
+		log.Printf("[INFO] Collector listening on %s", *collectorAddr)
+
+		// http.ListenAndServe() starts an HTTP server
+		//
+		// Parameters:
+		//   - addr: address to listen on
+		//     - ":8080" = all interfaces (0.0.0.0 and ::), port 8080
+		//     - "localhost:8080" = only local connections
+		//     - "192.168.1.10:8080" = specific IPv4 address
+		//     - "[::1]:8080" = IPv6 localhost
+		//     - "[::]:8080" = all IPv6 interfaces
+		//   - handler: if nil, uses the default ServeMux (what we registered with HandleFunc)
+		//
+		// Returns:
+		//   - error: only returns if the server fails to start or crashes
+		//            normally this function blocks forever
+		//
+		// Note: This is a blocking call - it runs forever until an error occurs
+		//
+		// *collectorAddr dereferences the pointer to get the string value from the flag
+		err := http.ListenAndServe(*collectorAddr, nil)
+
+		// If we reach here, the server crashed or failed to start
+		// log.Fatalf() prints the error and exits the program with code 1
+		// %v is a verb that prints the error message
+		if err != nil {
+			log.Fatalf("[FATAL] Collector server failed: %v", err)
+		}
+	}()
+
+	// Start web UI server in a goroutine
+	//
+	// The web server provides:
+	// - Dashboard showing all monitored hosts
+	// - Service status tables
+	// - Time-series graphs
+	// - Metrics API for Chart.js
+	//
+	// This runs concurrently with the collector server
+	go func() {
+		log.Printf("[INFO] Web UI listening on %s", *webAddr)
+
+		// Start web server with our custom ServeMux
+		//
+		// Unlike the collector (which uses nil = DefaultServeMux),
+		// we pass webMux explicitly so it only handles our web routes
+		//
+		// Address format examples:
+		// - "localhost:3000" = only local connections (default, most secure)
+		// - "0.0.0.0:3000" = all IPv4 interfaces
+		// - "[::]:3000" = all IPv6 interfaces
+		// - "192.168.1.10:3000" = specific IPv4 address
+		// - "[fe80::1]:3000" = specific IPv6 address
+		//
+		// *webAddr dereferences the pointer to get the string value from the flag
+		err := http.ListenAndServe(*webAddr, webMux)
+		if err != nil {
+			log.Fatalf("[FATAL] Web server failed: %v", err)
+		}
+	}()
+
+	// Wait for interrupt signal to gracefully shut down
+	//
+	// This keeps the program running until the user presses Ctrl+C
+	// or the system sends a termination signal
+	//
+	// Why do we need this?
+	// - Our HTTP servers are running in goroutines
+	// - If main() exits, the program terminates immediately
+	// - We need to keep main() alive so the servers can handle requests
+
+	// Create a channel to receive OS signals
+	// A channel is Go's way of communicating between goroutines
+	// Think of it like a pipe - one end sends, the other receives
+	//
+	// make(chan os.Signal, 1) creates a channel that can hold 1 signal
+	// The buffer size of 1 prevents the signal from being lost if we're not ready
+	quit := make(chan os.Signal, 1)
+
+	// signal.Notify() tells Go to send signals to our channel
+	//
+	// Parameters:
+	//   - quit: the channel to receive signals
+	//   - os.Interrupt: Ctrl+C signal (SIGINT)
+	//   - syscall.SIGTERM: termination signal (sent by "kill" command)
+	//
+	// When the user presses Ctrl+C or runs "kill <pid>", Go will send
+	// the signal to our quit channel
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+
+	// Wait for a signal
+	// The <- operator receives a value from a channel
+	// This line blocks (waits) until a signal is received
+	//
+	// When a signal arrives:
+	//   - It's received from the channel
+	//   - We continue to the next line
+	//   - The program can shut down gracefully
+	<-quit
+
+	// We received a shutdown signal
+	log.Printf("[INFO] Shutdown signal received, exiting...")
+
+	// Clean up PID file before exit
+	// We do this explicitly here because os.Exit() bypasses deferred functions
+	if err := os.Remove(*pidFile); err != nil {
+		log.Printf("[WARN] Failed to remove PID file: %v", err)
+	} else {
+		log.Printf("[INFO] Removed PID file: %s", *pidFile)
+	}
+
+	// TODO: Clean up resources
+	// - Close database connections (handled by defer in main)
+	// - Finish pending HTTP requests
+	// - Flush logs
+
+	log.Printf("[INFO] cmonit stopped")
+
+	// Exit with code 0 (success)
+	// In Unix, 0 means success, non-zero means error
+	os.Exit(0)
+}
+
+// handleCollector handles HTTP requests to the /collector endpoint
+//
+// This is the endpoint where Monit agents POST their status data.
+// Each Monit agent sends XML data every 30 seconds (configurable).
+//
+// Parameters:
+//   - w: http.ResponseWriter - used to write the HTTP response back to the client
+//   - r: *http.Request - contains the incoming request (method, headers, body, etc.)
+//
+// How HTTP handlers work in Go:
+// 1. Client makes a request to /collector
+// 2. Go's HTTP server receives the request
+// 3. Go looks up which handler is registered for /collector
+// 4. Go calls this function, passing the ResponseWriter and Request
+// 5. This function processes the request and writes a response
+// 6. Go sends the response back to the client
+//
+// This function currently implements basic functionality for T1.1 and T1.2.
+// We'll add more features in subsequent tests:
+// - T1.3-T1.5: HTTP Basic Authentication
+// - T1.7: XML parsing
+// - T1.8-T1.13: Database storage
+func handleCollector(w http.ResponseWriter, r *http.Request) {
+	// Log the incoming request for debugging
+	// This helps us see which hosts are sending data
+	//
+	// r.Method is the HTTP method (GET, POST, PUT, DELETE, etc.)
+	// r.RemoteAddr is the client's IP address and port
+	log.Printf("[DEBUG] %s /collector from %s", r.Method, r.RemoteAddr)
+
+	// Check if request method is POST
+	// The collector endpoint should only accept POST requests from Monit agents
+	//
+	// r.Method contains the HTTP method as a string
+	// We compare it to "POST" to ensure it's the correct method
+	if r.Method != http.MethodPost {
+		// http.Error() is a helper function that:
+		// 1. Sets the Content-Type to text/plain
+		// 2. Writes the status code
+		// 3. Writes the error message
+		//
+		// http.StatusMethodNotAllowed is the constant for 405
+		// 405 means "I understand the request, but this HTTP method isn't allowed"
+		log.Printf("[WARN] Method not allowed: %s", r.Method)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Validate HTTP Basic Authentication
+	//
+	// HTTP Basic Auth sends credentials in the Authorization header:
+	// Authorization: Basic base64(username:password)
+	//
+	// r.BasicAuth() is a helper function that:
+	// 1. Reads the Authorization header
+	// 2. Checks if it starts with "Basic "
+	// 3. Decodes the base64-encoded credentials
+	// 4. Splits them into username and password
+	//
+	// Returns:
+	//   - username: the username string
+	//   - password: the password string
+	//   - ok: bool - true if Basic Auth was provided, false otherwise
+	username, password, ok := r.BasicAuth()
+
+	// Check if authentication was provided and is correct
+	//
+	// Three conditions must all be true (connected with &&):
+	// 1. ok == true: Basic Auth header was present and valid format
+	// 2. username == "monit": the username matches
+	// 3. password == "monit": the password matches
+	//
+	// The ! operator means "not", so !ok means "Basic Auth was NOT provided"
+	// || means "or", so if ANY condition is true, the whole expression is true
+	//
+	// If auth fails, we need to:
+	// 1. Send WWW-Authenticate header (tells client to send credentials)
+	// 2. Return 401 Unauthorized status
+	if !ok || username != "monit" || password != "monit" {
+		// Set WWW-Authenticate header
+		// This tells the client:
+		// - "You need to authenticate"
+		// - "Use Basic authentication"
+		// - "The realm is 'cmonit'" (realm is like a protection space identifier)
+		//
+		// When a browser receives 401 + WWW-Authenticate, it shows a login dialog
+		w.Header().Set("WWW-Authenticate", `Basic realm="cmonit"`)
+
+		// Log the authentication failure for security monitoring
+		// Don't log the password (security best practice)
+		if !ok {
+			log.Printf("[WARN] Authentication missing from %s", r.RemoteAddr)
+		} else {
+			log.Printf("[WARN] Authentication failed for user '%s' from %s", username, r.RemoteAddr)
+		}
+
+		// Send 401 Unauthorized response
+		// http.StatusUnauthorized is the constant for 401
+		// 401 means "You need to authenticate to access this resource"
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+
+		// return exits the function early
+		// Nothing after this point will execute for this request
+		return
+	}
+
+	// If we reach here, authentication succeeded!
+	log.Printf("[DEBUG] Authenticated as '%s'", username)
+
+	// Check if the request body is gzip-compressed
+	//
+	// Monit can send compressed data to reduce bandwidth.
+	// When compression is enabled, it sends:
+	//   Content-Encoding: gzip
+	//
+	// r.Header.Get() retrieves a header value (case-insensitive)
+	// If the header doesn't exist, it returns "" (empty string)
+	//
+	// strings.Contains() checks if a string contains a substring
+	// We use it to handle variations like "gzip" or "gzip, deflate"
+	contentEncoding := r.Header.Get("Content-Encoding")
+	isGzipped := strings.Contains(strings.ToLower(contentEncoding), "gzip")
+
+	// Create a reader for the request body
+	// We'll either read it directly or decompress it first
+	//
+	// io.Reader is an interface - many types implement it:
+	// - r.Body (HTTP request body)
+	// - gzip.Reader (decompresses while reading)
+	// - bytes.Buffer, files, etc.
+	//
+	// This is Go's way of abstraction - we can swap implementations easily
+	var bodyReader io.Reader = r.Body
+
+	if isGzipped {
+		// Request is gzip-compressed, create a decompression reader
+		//
+		// gzip.NewReader() wraps the original reader and decompresses data
+		// as we read from it. This is called "streaming decompression" -
+		// we don't need to decompress everything into memory at once.
+		//
+		// How it works:
+		// 1. We read from gzipReader
+		// 2. gzipReader reads compressed data from r.Body
+		// 3. gzipReader decompresses it on-the-fly
+		// 4. We get decompressed data
+		//
+		// Returns:
+		//   - *gzip.Reader: a reader that decompresses
+		//   - error: nil if gzip header is valid, error if corrupted
+		gzipReader, err := gzip.NewReader(r.Body)
+		if err != nil {
+			log.Printf("[ERROR] Failed to create gzip reader: %v", err)
+			http.Error(w, "Failed to decompress request", http.StatusBadRequest)
+			return
+		}
+
+		// Schedule the gzip reader to be closed when function exits
+		// This is important to release internal buffers
+		defer gzipReader.Close()
+
+		// Use the gzip reader instead of the raw body
+		bodyReader = gzipReader
+
+		log.Printf("[DEBUG] Request is gzip-compressed, decompressing...")
+	}
+
+	// Read the request body (XML data from Monit)
+	//
+	// io.ReadAll() reads all bytes from a Reader until EOF
+	// bodyReader is either:
+	//   - r.Body directly (uncompressed)
+	//   - gzipReader (which decompresses from r.Body)
+	//
+	// Returns:
+	//   - []byte: all the bytes read (decompressed if gzipped)
+	//   - error: nil if successful, error if reading failed
+	//
+	// Why read all at once?
+	// - Monit's XML is small (usually <100KB, even smaller when compressed)
+	// - Simpler than streaming parse
+	// - We need all data to parse XML anyway
+	body, err := io.ReadAll(bodyReader)
+	if err != nil {
+		log.Printf("[ERROR] Failed to read request body: %v", err)
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		return
+	}
+
+	// Always close the request body when done
+	//
+	// defer means "run this when the function exits"
+	// Closing the body:
+	// - Releases resources (network socket, buffers)
+	// - Allows connection reuse (HTTP keep-alive)
+	// - Prevents resource leaks
+	//
+	// Why defer instead of immediate close?
+	// - Function might return early (errors, etc.)
+	// - defer ensures cleanup happens no matter how we exit
+	// - Like "finally" in try/catch/finally
+	defer r.Body.Close()
+
+	// Log the size for debugging
+	// Helps identify unusually large or small requests
+	log.Printf("[DEBUG] Received %d bytes from %s", len(body), r.RemoteAddr)
+
+	// Parse the XML into our data structures
+	//
+	// parser.ParseMonitXML() does:
+	// 1. Fix encoding declaration (ISO-8859-1 -> UTF-8)
+	// 2. Parse XML into structs using encoding/xml
+	// 3. Return populated MonitStatus struct
+	//
+	// Returns:
+	//   - *MonitStatus: parsed data
+	//   - error: nil if successful, error describing problem if failed
+	status, err := parser.ParseMonitXML(body)
+	if err != nil {
+		// XML parsing failed
+		// This could mean:
+		// - Malformed XML
+		// - Unexpected structure
+		// - Encoding issues
+		log.Printf("[ERROR] Failed to parse XML: %v", err)
+		http.Error(w, "Failed to parse XML", http.StatusBadRequest)
+		return
+	}
+
+	// Log what we received for debugging
+	log.Printf("[INFO] Parsed status from %s: %d services",
+		status.Server.LocalHostname, len(status.Services))
+
+	// Store everything in the database
+	//
+	// db.StoreMonitStatus() does:
+	// 1. Store host information (hosts table)
+	// 2. Store all services (services table)
+	// 3. Extract and store metrics (metrics table)
+	//
+	// This is where all the data persistence happens!
+	err = db.StoreMonitStatus(globalDB, status)
+	if err != nil {
+		// Database storage failed
+		// Log the error but still return success to Monit
+		// We don't want Monit to think we're down and stop sending data
+		log.Printf("[ERROR] Failed to store status: %v", err)
+		// Still return 200 OK (see comment below)
+	}
+
+	// Set response headers
+	//
+	// HTTP headers are metadata sent before the response body
+	// They tell the client about the response (content type, server info, etc.)
+	//
+	// w.Header() returns a Header map (like a dictionary)
+	// .Set(key, value) sets a header value
+
+	// Tell the client what software we're running
+	// Monit checks this to determine if it should use compression
+	w.Header().Set("Server", "cmonit/0.1")
+
+	// Tell the client we're sending plain text
+	// Content-Type describes the format of the response body
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+
+	// Send HTTP 200 OK status code
+	//
+	// w.WriteHeader() sends the status code and headers to the client
+	// After calling this, you can't modify headers anymore
+	//
+	// HTTP status codes:
+	//   - 200: OK (success)
+	//   - 400: Bad Request (client error)
+	//   - 401: Unauthorized (authentication required)
+	//   - 500: Internal Server Error (server error)
+	//
+	// http.StatusOK is a constant equal to 200
+	w.WriteHeader(http.StatusOK)
+
+	// Write the response body
+	//
+	// fmt.Fprintf() writes formatted text to an io.Writer
+	// w (ResponseWriter) implements io.Writer, so we can write to it
+	//
+	// This sends "OK\n" to the client
+	// The \n adds a newline at the end
+	fmt.Fprintf(w, "OK\n")
+
+	// The function returns here
+	// Go automatically sends the response to the client
+	// No need to explicitly "send" like in some other languages
+}
+
+// parseSyslogFacility converts a facility string to syslog.Priority
+//
+// Supported facilities:
+//   - daemon: LOG_DAEMON facility
+//   - local0-local7: LOG_LOCAL0 through LOG_LOCAL7
+//
+// Returns:
+//   - syslog.Priority: The priority combining facility and severity
+//   - error: If the facility string is invalid
+func parseSyslogFacility(facility string) (syslog.Priority, error) {
+	// Map facility names to syslog constants
+	// The priority combines facility (where to log) and severity (log level)
+	// We use LOG_INFO as the default severity
+	facilities := map[string]syslog.Priority{
+		"daemon": syslog.LOG_DAEMON | syslog.LOG_INFO,
+		"local0": syslog.LOG_LOCAL0 | syslog.LOG_INFO,
+		"local1": syslog.LOG_LOCAL1 | syslog.LOG_INFO,
+		"local2": syslog.LOG_LOCAL2 | syslog.LOG_INFO,
+		"local3": syslog.LOG_LOCAL3 | syslog.LOG_INFO,
+		"local4": syslog.LOG_LOCAL4 | syslog.LOG_INFO,
+		"local5": syslog.LOG_LOCAL5 | syslog.LOG_INFO,
+		"local6": syslog.LOG_LOCAL6 | syslog.LOG_INFO,
+		"local7": syslog.LOG_LOCAL7 | syslog.LOG_INFO,
+	}
+
+	priority, ok := facilities[strings.ToLower(facility)]
+	if !ok {
+		return 0, fmt.Errorf("unknown facility '%s', supported: daemon, local0-local7", facility)
+	}
+
+	return priority, nil
+}

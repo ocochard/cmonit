@@ -12,6 +12,8 @@ An open-source M/Monit clone that collects and visualizes monitoring data from M
 - Time-series graphs (CPU, memory, load)
 - Multiple time ranges (1h, 6h, 24h, 7d, 30d)
 - Configurable listen addresses (IPv4/IPv6 support)
+- HTTP Basic Authentication for Web UI
+- TLS/HTTPS support for encrypted connections
 
 ## Quick Start
 
@@ -53,6 +55,15 @@ go build -o cmonit ./cmd/cmonit
 
 # Development mode (current directory, stderr logging)
 ./cmonit -db ./cmonit.db -pidfile ./cmonit.pid
+
+# With HTTP Basic Authentication
+./cmonit -web-user admin -web-password secretpass
+
+# With TLS/HTTPS
+./cmonit -web-cert /path/to/cert.pem -web-key /path/to/key.pem
+
+# Production: Authentication + TLS
+./cmonit -web 0.0.0.0:3000 -web-user admin -web-password secretpass -web-cert /path/to/cert.pem -web-key /path/to/key.pem
 ```
 
 ### Command-Line Options
@@ -75,6 +86,18 @@ go build -o cmonit ./cmd/cmonit
   -syslog string
         Syslog facility for daemon logging (daemon, local0-local7)
         Leave empty for stderr logging (default: empty)
+
+  -web-user string
+        Web UI HTTP Basic Auth username (empty = no authentication)
+
+  -web-password string
+        Web UI HTTP Basic Auth password (empty = no authentication)
+
+  -web-cert string
+        Web UI TLS certificate file (empty = HTTP only)
+
+  -web-key string
+        Web UI TLS key file (empty = HTTP only)
 ```
 
 ### Access
@@ -88,10 +111,14 @@ Open your browser to the configured web address:
 Add to your monitrc file:
 
 ```
-set mmonit http://monit:monit@your-server:8080/collector
+set mmonit
+  http://monit:monit@cmonit-server:8080/collector
+set httpd port 2812 and
+  allow cmonit-server
+  allow user:password
 ```
 
-Replace `your-server` with the hostname or IP where cmonit is running.
+Replace `cmonit-server` with the hostname or IP where cmonit is running.
 
 Example:
 ```bash
@@ -113,12 +140,54 @@ monit reload
 Monit Agent → :8080/collector → SQLite → :3000 Dashboard
 ```
 
-## Security Notes
+## Security
+
+### Web UI Authentication
+
+Protect your dashboard with HTTP Basic Authentication:
+
+```bash
+./cmonit -web-user admin -web-password your-secure-password
+```
+
+When enabled, all web requests will require authentication. Failed attempts are logged for security auditing.
+
+### TLS/HTTPS Support
+
+Enable encrypted connections with TLS certificates:
+
+```bash
+# Generate self-signed certificate (testing only)
+openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes
+
+# Run with TLS
+./cmonit -web-cert cert.pem -web-key key.pem
+```
+
+For production, use certificates from a trusted CA (Let's Encrypt, etc.).
+
+### Production Security
+
+Recommended production configuration:
+
+```bash
+./cmonit \
+  -web 0.0.0.0:3000 \
+  -web-user admin \
+  -web-password "$(cat /etc/cmonit/password)" \
+  -web-cert /etc/cmonit/cert.pem \
+  -web-key /etc/cmonit/key.pem \
+  -syslog daemon
+```
+
+Additional recommendations:
 
 - **Default**: Web UI listens on `localhost:3000` (local connections only)
-- **Production**: Use a reverse proxy (nginx/apache) with HTTPS
 - **Firewall**: Restrict collector port (8080) to trusted Monit agents
-- **Authentication**: Collector uses HTTP Basic Auth (monit:monit by default)
+- **Authentication**: Both Web UI and collector support HTTP Basic Auth
+- **Passwords**: Store credentials securely, never commit to version control
+- **Certificates**: Use valid certificates from a trusted CA for production
+- **Logging**: Enable syslog for security event monitoring
 
 ## Development
 

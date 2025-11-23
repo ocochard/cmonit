@@ -85,6 +85,18 @@ func main() {
 	webAddr := flag.String("web", "localhost:3000",
 		"Web UI listen address (e.g., localhost:3000, 0.0.0.0:3000, [::]:3000, 192.168.1.10:3000)")
 
+	webUser := flag.String("web-user", "",
+		"Web UI HTTP Basic Auth username (empty = no authentication)")
+
+	webPassword := flag.String("web-password", "",
+		"Web UI HTTP Basic Auth password (empty = no authentication)")
+
+	webCert := flag.String("web-cert", "",
+		"Web UI TLS certificate file (empty = HTTP only)")
+
+	webKey := flag.String("web-key", "",
+		"Web UI TLS key file (empty = HTTP only)")
+
 	dbPath := flag.String("db", "/var/run/cmonit/cmonit.db",
 		"Database file path")
 
@@ -333,24 +345,39 @@ func main() {
 	//
 	// This runs concurrently with the collector server
 	go func() {
-		log.Printf("[INFO] Web UI listening on %s", *webAddr)
+		// Prepare the handler with optional authentication
+		var handler http.Handler = webMux
 
-		// Start web server with our custom ServeMux
-		//
-		// Unlike the collector (which uses nil = DefaultServeMux),
-		// we pass webMux explicitly so it only handles our web routes
-		//
-		// Address format examples:
-		// - "localhost:3000" = only local connections (default, most secure)
-		// - "0.0.0.0:3000" = all IPv4 interfaces
-		// - "[::]:3000" = all IPv6 interfaces
-		// - "192.168.1.10:3000" = specific IPv4 address
-		// - "[fe80::1]:3000" = specific IPv6 address
-		//
-		// *webAddr dereferences the pointer to get the string value from the flag
-		err := http.ListenAndServe(*webAddr, webMux)
-		if err != nil {
-			log.Fatalf("[FATAL] Web server failed: %v", err)
+		// Add HTTP Basic Auth if credentials are provided
+		if *webUser != "" && *webPassword != "" {
+			log.Printf("[INFO] Web UI authentication enabled for user: %s", *webUser)
+			handler = basicAuth(webMux, *webUser, *webPassword)
+		} else {
+			log.Printf("[WARNING] Web UI authentication disabled - use -web-user and -web-password for production")
+		}
+
+		// Validate TLS configuration
+		tlsEnabled := *webCert != "" || *webKey != ""
+		if tlsEnabled {
+			if *webCert == "" || *webKey == "" {
+				log.Fatalf("[FATAL] Both -web-cert and -web-key must be provided for TLS")
+			}
+		}
+
+		// Start the appropriate server (HTTP or HTTPS)
+		if tlsEnabled {
+			log.Printf("[INFO] Web UI listening on %s (HTTPS)", *webAddr)
+			err := http.ListenAndServeTLS(*webAddr, *webCert, *webKey, handler)
+			if err != nil {
+				log.Fatalf("[FATAL] Web server failed: %v", err)
+			}
+		} else {
+			log.Printf("[INFO] Web UI listening on %s (HTTP)", *webAddr)
+			log.Printf("[WARNING] TLS disabled - use -web-cert and -web-key for encrypted connections")
+			err := http.ListenAndServe(*webAddr, handler)
+			if err != nil {
+				log.Fatalf("[FATAL] Web server failed: %v", err)
+			}
 		}
 	}()
 
@@ -741,4 +768,70 @@ func parseSyslogFacility(facility string) (syslog.Priority, error) {
 	}
 
 	return priority, nil
+}
+
+// basicAuth wraps an HTTP handler with HTTP Basic Authentication.
+//
+// HTTP Basic Auth is a simple authentication scheme built into HTTP.
+// The client must send username:password in the Authorization header.
+//
+// Parameters:
+//   - next: The handler to wrap (will only be called if auth succeeds)
+//   - username: Required username
+//   - password: Required password
+//
+// Returns:
+//   - http.Handler: Wrapped handler that checks credentials first
+//
+// How it works:
+// 1. Extract credentials from Authorization header
+// 2. Compare with expected username/password
+// 3. If match: call next handler
+// 4. If no match: return 401 Unauthorized
+//
+// Security notes:
+// - Use HTTPS to encrypt credentials in transit
+// - Store passwords securely (consider environment variables)
+// - Use strong passwords in production
+func basicAuth(next http.Handler, username, password string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Get credentials from Authorization header
+		//
+		// r.BasicAuth() extracts username/password from the header
+		// Returns:
+		//   - user: the username
+		//   - pass: the password
+		//   - ok: true if Authorization header was present and valid format
+		user, pass, ok := r.BasicAuth()
+
+		// Check if credentials match
+		//
+		// Must check three conditions:
+		// 1. Authorization header was present (ok == true)
+		// 2. Username matches
+		// 3. Password matches
+		//
+		// Use == for comparison (case-sensitive)
+		if !ok || user != username || pass != password {
+			// Authentication failed - return 401 Unauthorized
+			//
+			// WWW-Authenticate header tells the browser to show login dialog
+			// Basic realm="..." is the authentication realm (domain/area)
+			w.Header().Set("WWW-Authenticate", `Basic realm="cmonit"`)
+
+			// 401 = Unauthorized (though "Unauthenticated" would be more accurate)
+			// This tells the client that authentication is required
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+
+			// Log the failed attempt (security audit trail)
+			log.Printf("[WARNING] Failed authentication attempt from %s (user: %s)", r.RemoteAddr, user)
+			return
+		}
+
+		// Authentication succeeded - call the next handler
+		//
+		// next.ServeHTTP() passes the request to the wrapped handler
+		// The request continues normally from here
+		next.ServeHTTP(w, r)
+	})
 }

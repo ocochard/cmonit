@@ -37,6 +37,10 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
+// currentSchemaVersion is the current database schema version.
+// Increment this when making schema changes that require migration.
+const currentSchemaVersion = 1
+
 // SQL schema for the cmonit database
 //
 // This schema is designed to:
@@ -45,11 +49,32 @@ import (
 // 3. Record events (state changes)
 //
 // Why these tables?
+// - schema_version: Tracks database schema version for safe migrations
 // - hosts: One row per Monit agent
 // - services: One row per monitored service (per host)
 // - metrics: Time-series data for graphing (many rows per service)
 // - events: State changes (service failed, recovered, etc.)
 const (
+	// createSchemaVersionTable creates the schema_version table
+	//
+	// This table stores the current database schema version.
+	// It prevents issues when updating the schema in future versions.
+	//
+	// Why schema versioning?
+	// - SQLite's "IF NOT EXISTS" doesn't modify existing tables
+	// - Adding/removing columns requires ALTER TABLE or recreation
+	// - Version tracking allows safe, automated migrations
+	//
+	// Columns:
+	//   - version: Integer version number (e.g., 1, 2, 3...)
+	//   - applied_at: When this schema version was applied
+	//
+	// This table should have exactly one row at all times.
+	createSchemaVersionTable = `
+	CREATE TABLE IF NOT EXISTS schema_version (
+		version INTEGER PRIMARY KEY,
+		applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);`
 	// createHostsTable creates the hosts table
 	//
 	// This table stores information about each monitored server/machine.
@@ -320,6 +345,46 @@ func InitDB(dbPath string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to enable foreign keys: %w", err)
 	}
 
+	// Create schema_version table first
+	// This must exist before we can check the version
+	_, err = db.Exec(createSchemaVersionTable)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to create schema_version table: %w", err)
+	}
+
+	// Check current schema version
+	currentVersion, err := getSchemaVersion(db)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to get schema version: %w", err)
+	}
+
+	// If this is a new database (version = 0), set it to current version
+	if currentVersion == 0 {
+		log.Printf("[INFO] New database detected, initializing schema version %d", currentSchemaVersion)
+		err = setSchemaVersion(db, currentSchemaVersion)
+		if err != nil {
+			db.Close()
+			return nil, fmt.Errorf("failed to set schema version: %w", err)
+		}
+	} else if currentVersion < currentSchemaVersion {
+		// Future migrations would go here
+		log.Printf("[INFO] Migrating database from version %d to %d", currentVersion, currentSchemaVersion)
+		err = migrateSchema(db, currentVersion, currentSchemaVersion)
+		if err != nil {
+			db.Close()
+			return nil, fmt.Errorf("failed to migrate schema: %w", err)
+		}
+	} else if currentVersion > currentSchemaVersion {
+		// Database is newer than this version of cmonit
+		db.Close()
+		return nil, fmt.Errorf("database schema version %d is newer than supported version %d - please upgrade cmonit",
+			currentVersion, currentSchemaVersion)
+	} else {
+		log.Printf("[INFO] Database schema version %d is up to date", currentVersion)
+	}
+
 	// Enable Write-Ahead Logging (WAL) mode
 	//
 	// WAL improves concurrency:
@@ -395,4 +460,101 @@ func InitDB(dbPath string) (*sql.DB, error) {
 	// Return the database connection
 	// The caller is responsible for closing it with defer db.Close()
 	return db, nil
+}
+
+// getSchemaVersion returns the current database schema version.
+//
+// Returns:
+//   - version: Current schema version (0 if no version is set)
+//   - error: nil if successful, error if query failed
+func getSchemaVersion(db *sql.DB) (int, error) {
+	var version int
+	err := db.QueryRow("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1").Scan(&version)
+	if err == sql.ErrNoRows {
+		// No version row exists yet, this is a new database
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("failed to query schema version: %w", err)
+	}
+	return version, nil
+}
+
+// setSchemaVersion sets the database schema version.
+//
+// Parameters:
+//   - db: Database connection
+//   - version: Version number to set
+//
+// Returns:
+//   - error: nil if successful, error if update failed
+func setSchemaVersion(db *sql.DB, version int) error {
+	_, err := db.Exec("INSERT OR REPLACE INTO schema_version (version) VALUES (?)", version)
+	if err != nil {
+		return fmt.Errorf("failed to set schema version: %w", err)
+	}
+	log.Printf("[INFO] Set database schema version to %d", version)
+	return nil
+}
+
+// migrateSchema performs database schema migrations.
+//
+// This function handles migrations from older schema versions to newer ones.
+// Each migration step is a separate case that modifies the database structure.
+//
+// Parameters:
+//   - db: Database connection
+//   - fromVersion: Current schema version
+//   - toVersion: Target schema version
+//
+// Returns:
+//   - error: nil if migration succeeded, error if it failed
+//
+// How to add migrations:
+// 1. Increment currentSchemaVersion constant
+// 2. Add a new case in the switch statement below
+// 3. Apply ALTER TABLE or other DDL statements
+// 4. Update the version number
+//
+// Example future migration (version 1 -> 2):
+//
+//	case 1:
+//	    // Add new column to hosts table
+//	    _, err = db.Exec("ALTER TABLE hosts ADD COLUMN new_field TEXT")
+//	    if err != nil {
+//	        return fmt.Errorf("migration v1->v2 failed: %w", err)
+//	    }
+//	    err = setSchemaVersion(db, 2)
+//	    if err != nil {
+//	        return err
+//	    }
+//	    log.Printf("[INFO] Migrated to schema version 2")
+//	    fromVersion = 2
+func migrateSchema(db *sql.DB, fromVersion, toVersion int) error {
+	log.Printf("[INFO] Starting schema migration from v%d to v%d", fromVersion, toVersion)
+
+	// Apply migrations sequentially
+	for fromVersion < toVersion {
+		switch fromVersion {
+		// Future migrations will be added here
+		// Example:
+		// case 1:
+		//     // Migration from version 1 to version 2
+		//     _, err := db.Exec("ALTER TABLE hosts ADD COLUMN some_field TEXT")
+		//     if err != nil {
+		//         return fmt.Errorf("migration v1->v2 failed: %w", err)
+		//     }
+		//     fromVersion = 2
+		//     err = setSchemaVersion(db, fromVersion)
+		//     if err != nil {
+		//         return err
+		//     }
+
+		default:
+			return fmt.Errorf("no migration path from version %d", fromVersion)
+		}
+	}
+
+	log.Printf("[INFO] Schema migration completed successfully")
+	return nil
 }

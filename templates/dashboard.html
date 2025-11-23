@@ -165,28 +165,39 @@
                                 <button onclick="changeTimeRange('{{$host.ID}}', '{{.Name}}', '1h')" class="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-sm time-btn" data-range="1h">1h</button>
                                 <button onclick="changeTimeRange('{{$host.ID}}', '{{.Name}}', '6h')" class="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-sm time-btn" data-range="6h">6h</button>
                                 <button onclick="changeTimeRange('{{$host.ID}}', '{{.Name}}', '24h')" class="px-3 py-1 bg-blue-600 text-white rounded text-sm time-btn active" data-range="24h">24h</button>
-                                <button onclick="changeTimeRange('{{$host.ID}}', '{{.Name}}', '7d')" class="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-sm time-btn" data-range="7d">7d</button>
-                                <button onclick="changeTimeRange('{{$host.ID}}', '{{.Name}}', '30d')" class="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-sm time-btn" data-range="30d">30d</button>
                             </div>
                         </div>
 
                         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <div class="bg-gray-50 p-4 rounded">
                                 <h4 class="text-sm font-semibold text-gray-700 mb-2">System Load</h4>
-                                <canvas id="load-chart-{{$host.ID}}" width="400" height="250"></canvas>
+                                <div style="position: relative; height: 200px;">
+                                    <canvas id="load-chart-{{$host.ID}}"></canvas>
+                                </div>
                             </div>
                             <div class="bg-gray-50 p-4 rounded">
                                 <h4 class="text-sm font-semibold text-gray-700 mb-2">CPU Usage</h4>
-                                <canvas id="cpu-chart-{{$host.ID}}" width="400" height="250"></canvas>
+                                <div style="position: relative; height: 200px;">
+                                    <canvas id="cpu-chart-{{$host.ID}}"></canvas>
+                                </div>
                             </div>
                             <div class="bg-gray-50 p-4 rounded">
                                 <h4 class="text-sm font-semibold text-gray-700 mb-2">Memory Usage</h4>
-                                <canvas id="memory-chart-{{$host.ID}}" width="400" height="250"></canvas>
+                                <div style="position: relative; height: 200px;">
+                                    <canvas id="memory-chart-{{$host.ID}}"></canvas>
+                                </div>
                             </div>
                         </div>
                     </div>
                     <script>
-                        loadMetrics('{{$host.ID}}', '{{.Name}}', '24h');
+                        // Load metrics after DOM is ready
+                        if (document.readyState === 'loading') {
+                            document.addEventListener('DOMContentLoaded', function() {
+                                loadMetrics('{{$host.ID}}', '{{.Name}}', '24h');
+                            });
+                        } else {
+                            loadMetrics('{{$host.ID}}', '{{.Name}}', '24h');
+                        }
                     </script>
                     {{end}}
                     {{end}}
@@ -279,12 +290,22 @@
             },
             options: {
                 responsive: true,
-                maintainAspectRatio: false,
+                maintainAspectRatio: true,
+                aspectRatio: 2,
                 plugins: {
                     legend: { display: true, position: 'top' }
                 },
                 scales: {
-                    y: { beginAtZero: true, title: { display: true, text: 'Load' } }
+                    y: {
+                        beginAtZero: false,
+                        grace: '10%',
+                        title: { display: true, text: 'Load' },
+                        ticks: {
+                            callback: function(value) {
+                                return value.toFixed(2);
+                            }
+                        }
+                    }
                 }
             }
         });
@@ -326,12 +347,22 @@
             },
             options: {
                 responsive: true,
-                maintainAspectRatio: false,
+                maintainAspectRatio: true,
+                aspectRatio: 2,
                 plugins: {
                     legend: { display: true, position: 'top' }
                 },
                 scales: {
-                    y: { beginAtZero: true, max: 100, title: { display: true, text: '%' } }
+                    y: {
+                        beginAtZero: true,
+                        grace: '10%',
+                        title: { display: true, text: '%' },
+                        ticks: {
+                            callback: function(value) {
+                                return value.toFixed(1) + '%';
+                            }
+                        }
+                    }
                 }
             }
         });
@@ -366,12 +397,22 @@
             },
             options: {
                 responsive: true,
-                maintainAspectRatio: false,
+                maintainAspectRatio: true,
+                aspectRatio: 2,
                 plugins: {
                     legend: { display: true, position: 'top' }
                 },
                 scales: {
-                    y: { beginAtZero: true, max: 100, title: { display: true, text: '%' } }
+                    y: {
+                        beginAtZero: true,
+                        grace: '10%',
+                        title: { display: true, text: '%' },
+                        ticks: {
+                            callback: function(value) {
+                                return value.toFixed(1) + '%';
+                            }
+                        }
+                    }
                 }
             }
         });
@@ -437,6 +478,11 @@
             alert('Failed to execute action: ' + error.message);
         }
     }
+
+    // Auto-refresh page every 60 seconds
+    setInterval(function() {
+        window.location.reload();
+    }, 60000);
     </script>
 </body>
 </html>

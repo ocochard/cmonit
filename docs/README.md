@@ -1,503 +1,282 @@
-# cmonit Documentation
+# cmonit Developer Documentation
 
-## Quick Links
+This directory contains technical documentation for cmonit developers and contributors.
 
-- **[Project Plan](project-plan.md)** - Complete project roadmap, phases, and architecture
-- **[Monit Collector Protocol](monit-collector-protocol.md)** - Technical details of Monit→M/Monit communication
-- **[Monit XML Reference](monit-xml-reference.md)** - Complete reference of all Monit XML fields (used and unused)
-- **[Testing Plan](testing-plan.md)** - Detailed acceptance tests for each phase
-- **[Coding Standards](coding-standards.md)** - Educational commenting guidelines (MUST READ!)
+## Quick Reference
 
----
+- **[Project Plan](project-plan.md)** - Architecture, phases, and implementation roadmap
+- **[Monit Collector Protocol](monit-collector-protocol.md)** - Technical details of Monit XML protocol
+- **[Monit XML Reference](monit-xml-reference.md)** - Complete XML field reference
+- **[Testing Plan](testing-plan.md)** - Acceptance tests for all phases
+- **[Coding Standards](coding-standards.md)** - Code documentation guidelines
 
-## Project Overview
+## For End Users
 
-**cmonit** (Central Monit) is an open-source centralized monitoring dashboard for Monit. It provides monitoring and management of all Monit-enabled hosts through a modern, clean, mobile-friendly web interface.
-
-### Key Features
-
-#### Monitoring & Visualization
-✅ **Multi-page Dashboard** - Status overview, host details, and events pages
-✅ **Real-time Status** - Color-coded status indicators (green/orange/red/gray)
-✅ **System Metrics** - CPU, Memory, Load average with time-series graphs
-✅ **Multiple Time Ranges** - 1h, 6h, 24h for historical data visualization
-✅ **Platform Information** - OS, CPU count, memory, uptime display
-✅ **Process Monitoring** - PID, CPU%, memory usage for process services
-
-#### Events & Alerts
-✅ **Event Tracking** - Automatic logging of service state changes
-✅ **Monit Restart Detection** - Tracks Monit daemon uptime and detects restarts
-✅ **Event History** - View all events per host with timestamps and details
-✅ **Stale Host Detection** - Alerts when hosts stop reporting (>5 minutes)
-
-#### Service Control
-✅ **Remote Actions** - Start, stop, restart services from the dashboard
-✅ **Monitor Control** - Enable/disable monitoring for individual services
-✅ **Real-time Feedback** - Action confirmation and status updates
-
-#### Security & Deployment
-✅ **HTTP Basic Authentication** - Protect web UI with username/password
-✅ **TLS/HTTPS Support** - Encrypted connections with certificate support
-✅ **Configurable Addresses** - IPv4/IPv6, custom ports, specific interface binding
-✅ **SQLite Database** - Reliable storage with WAL mode for concurrency
-✅ **Syslog Integration** - Daemon logging for production environments
-✅ **Single Binary** - No dependencies, easy deployment
-✅ **Mobile Friendly** - Responsive design works on phones/tablets
+If you're looking to **use** cmonit (not develop it), see the main [README.md](../README.md) in the project root.
 
 ---
 
-## Technology Stack - Approved ✅
+## Project Status: ✅ Production Ready
 
-Your proposed technology stack is **excellent** and follows KISS principles:
+All planned phases have been successfully completed:
 
-### Backend: **Go (Golang)** ✅
-
-**Why Go is the right choice:**
-- ✅ Single binary deployment (just `./cmonit`)
-- ✅ Excellent HTTP/concurrent request handling
-- ✅ Built-in templating for HTML
-- ✅ Cross-platform (FreeBSD, Linux, macOS)
-- ✅ Low memory footprint
-- ✅ Easy to maintain
-- ✅ Standard library handles XML, HTTP, SQLite
-
-**Alternatives considered:**
-- Python: ❌ Requires runtime, slower for HTTP services
-- Node.js: ❌ Requires runtime, npm dependency complexity
-- Rust: ❌ Steeper learning curve, overkill for this project
-
-**Verdict:** Go is perfect for this use case.
-
-### Database: **SQLite** ✅
-
-**Why SQLite is the right choice:**
-- ✅ No separate database server needed
-- ✅ Zero configuration
-- ✅ File-based (easy backup: just copy the .db file)
-- ✅ Perfect for embedded systems
-- ✅ Handles 100+ hosts easily
-- ✅ ACID compliant
-
-**Alternatives considered:**
-- PostgreSQL/MySQL: ❌ Overkill, requires separate server
-- InfluxDB: ❌ Adds complexity, unnecessary for this scale
-
-**Verdict:** SQLite is ideal for small-to-medium deployments. Can migrate to PostgreSQL later if needed (1000+ hosts).
-
-### Frontend: **Tailwind CSS + Chart.js** ✅
-
-**Why this combination is perfect:**
-- ✅ No build step required (CDN-based)
-- ✅ Modern, responsive design out of the box
-- ✅ Mobile-friendly by default
-- ✅ Chart.js is simple and lightweight
-- ✅ Can use Go's `html/template` for server-side rendering
-
-**Verdict:** Perfect choice for a clean, simple, maintainable UI.
+| Phase | Status | Description |
+|-------|--------|-------------|
+| Phase 1 | ✅ Complete | Collector daemon receiving Monit data |
+| Phase 2 | ✅ Complete | Multi-page web dashboard |
+| Phase 3 | ✅ Complete | Time-series graphs with Chart.js |
+| Phase 4 | ✅ Complete | M/Monit-compatible HTTP API |
 
 ---
 
-## Answers to Your Questions
+## Architecture Overview
 
-### Q: What do you think of the current proposal?
+### Technology Stack
 
-**A:** The proposal is **excellent**! The technology choices are sound, and the phased approach is correct:
+**Backend:**
+- **Go 1.21+** - Single binary, excellent concurrency
+- **SQLite** - Embedded database with WAL mode
+- **Standard library** - `net/http`, `html/template`, `encoding/xml`
 
-1. ✅ Build collector daemon first (foundation)
-2. ✅ Store data in SQLite
-3. ✅ Create minimal web UI with tables
-4. ✅ Add time-series graphs
-
-This follows proper software engineering: **data layer → API layer → presentation layer**.
-
-### Q: Do you need multiple Monit clients for testing?
-
-**A:** It depends on the phase:
-
-**Phase 1 & 2 (Collector + Dashboard):**
-- ✅ **Single Monit client is sufficient**
-- You already have one running with multiple services
-- This is enough to validate basic functionality
-
-**Phase 3 (Graphs):**
-- ✅ **Single Monit client is still fine**
-- Time-series graphs just need data over time
-- Let collector run for 1+ hours to accumulate data
-
-**Phase 4+ (Load Testing):**
-- ⚠️ **Multiple clients recommended**
-- Test with 10-50 simulated hosts
-- Options:
-  1. **Docker containers** - Easiest (if Docker available)
-  2. **FreeBSD jails** - Native FreeBSD solution
-  3. **Mock data generator** - Write Go tool to simulate multiple hosts
-
-**Recommendation:** Start with your existing single Monit agent. Add multiple test clients only when needed for performance testing (Phase 4+).
-
-### Q: What about tests for each step?
-
-**A:** Yes! The [Testing Plan](testing-plan.md) includes **detailed acceptance tests** for each phase:
-
-- **Phase 1:** 16 tests (T1.1 - T1.16)
-- **Phase 2:** 10 tests (T2.1 - T2.10)
-- **Phase 3:** 15 tests (T3.1 - T3.15)
-
-Each test includes:
-- Clear description
-- Step-by-step instructions
-- Exact commands to run
-- Expected results
-- Pass/fail criteria
-
-**Testing approach:**
-```
-Plan → Act → Validate
-  ↑              ↓
-  └──────────────┘
-```
-
-You must NOT proceed to the next step until the current test passes!
-
----
-
-## Development Roadmap
-
-### Phase 1: Collector Daemon (Days 1-2)
-
-**Goal:** Receive and store Monit status data
-
-**Components:**
-- HTTP server on port 8080
-- `/collector` endpoint (POST)
-- HTTP Basic Auth
-- XML parser
-- SQLite database
-- Data insertion
-
-**Tests:** 16 acceptance tests (T1.1 - T1.16)
-
-**Deliverable:** Working daemon collecting data from your running Monit agent
-
----
-
-### Phase 2: Web Dashboard (Days 3-4)
-
-**Goal:** Display current status of all hosts/services
-
-**Components:**
-- Web server on port 3000
-- Dashboard page (HTML template)
-- Service status table
-- Tailwind CSS styling
-- Auto-refresh (30s)
-
-**Tests:** 10 acceptance tests (T2.1 - T2.10)
-
-**Deliverable:** Functional web dashboard showing real-time status
-
----
-
-### Phase 3: Time-Series Graphs (Days 5-6)
-
-**Goal:** Visualize metrics over time
-
-**Components:**
-- Graphs page per host
-- Chart.js integration
-- Time-series queries
-- Time range selector (1h, 6h, 24h, 7d, 30d)
-
-**Tests:** 15 acceptance tests (T3.1 - T3.15)
-
-**Deliverable:** Interactive graphs for CPU, memory, disk, load average
-
----
-
-### Phase 4: M/Monit API (Days 7-8)
-
-**Goal:** API compatibility with M/Monit
-
-**Components:**
-- REST API endpoints
-- JSON responses
-- Authentication
-- Documentation
-
-**Tests:** API integration tests (TBD)
-
-**Deliverable:** M/Monit-compatible REST API
-
----
-
-## Getting Started
-
-### Prerequisites
-
-- Go 1.21+ installed
-- FreeBSD system (your current environment)
-- Running Monit agent (already configured)
+**Frontend:**
+- **Tailwind CSS** - Utility-first CSS framework (CDN)
+- **Chart.js** - Time-series visualization (CDN)
+- **Server-side rendering** - Go templates, no build step
 
 ### Project Structure
 
 ```
 cmonit/
-├── cmd/
-│   └── cmonit/
-│       └── main.go              # Entry point
+├── cmd/cmonit/main.go           # Application entry point
 ├── internal/
-│   ├── api/
-│   │   ├── collector.go         # /collector endpoint
-│   │   └── handlers.go
 │   ├── db/
-│   │   ├── schema.go            # Database schema
-│   │   ├── models.go            # Data models
-│   │   └── queries.go
+│   │   ├── schema.go            # Database schema & migrations
+│   │   └── storage.go           # Data storage operations
 │   ├── parser/
-│   │   └── xml.go               # XML parser
-│   ├── web/
-│   │   ├── server.go
-│   │   └── handlers.go
-│   └── config/
-│       └── config.go
-├── web/
-│   ├── templates/
-│   │   ├── base.html
-│   │   ├── dashboard.html
-│   │   ├── host.html
-│   │   └── graphs.html
-│   └── static/
-├── docs/                        # This directory!
-│   ├── README.md
-│   ├── project-plan.md
-│   ├── monit-collector-protocol.md
-│   └── testing-plan.md
-├── LICENSE
-├── go.mod
-├── go.sum
-├── Makefile
-└── .gitignore
+│   │   ├── xml.go               # Monit XML parser
+│   │   └── xml_test.go          # Parser unit tests
+│   └── web/
+│       ├── handler.go           # Dashboard HTTP handlers
+│       ├── api.go               # Metrics & action APIs
+│       └── mmonit_api.go        # M/Monit compatibility API
+├── templates/
+│   └── dashboard.html           # Single-file HTML template
+├── rc.d/cmonit                  # FreeBSD startup script
+└── docs/                        # Developer documentation
 ```
-
-### First Steps
-
-Ready to start coding? Here's what to do:
-
-1. **Initialize Go module:**
-   ```bash
-   cd /usr/home/olivier/cmonit
-   go mod init github.com/ocochard/cmonit
-   ```
-
-2. **Create project structure:**
-   ```bash
-   mkdir -p cmd/cmonit
-   mkdir -p internal/{api,db,parser,web,config}
-   mkdir -p web/{templates,static}
-   ```
-
-3. **Start with Phase 1, Test T1.1:**
-   - Create `cmd/cmonit/main.go`
-   - Basic HTTP server listening on :8080
-   - Run test T1.1 (Server Startup)
-
-4. **Follow the plan:**
-   - One test at a time
-   - Plan → Act → Validate
-   - Only proceed when test passes
 
 ---
 
-## Current System Status
+## Key Features Implemented
 
-cmonit is fully operational with:
-- ✅ HTTP Collector on port 8080 receiving Monit status data
-- ✅ Web Dashboard on port 3000 (configurable)
-- ✅ SQLite database with WAL mode for data persistence
-- ✅ Multi-page interface: Status Overview, Host Details, Events
-- ✅ Time-series graphs for system metrics
-- ✅ Service control API (start/stop/restart/monitor/unmonitor)
-- ✅ Event tracking and Monit restart detection
-- ✅ HTTP Basic Authentication support
-- ✅ TLS/HTTPS support
-- ✅ Syslog integration
-- ✅ FreeBSD rc.d startup script
+### Core Functionality
+- ✅ HTTP collector endpoint receiving Monit XML status
+- ✅ SQLite storage with automatic schema migrations
+- ✅ Multi-page dashboard: Status, Host Details, Events
+- ✅ Real-time system metrics graphs (Load, CPU, Memory)
+- ✅ Service control actions (start, stop, restart, monitor, unmonitor)
+- ✅ Event tracking with Monit restart detection
+- ✅ Stale host detection (>5 minutes without updates)
 
-### Configure Monit Agents
+### M/Monit API Compatibility
+- ✅ `GET /status/hosts` - List all hosts with status
+- ✅ `GET /status/hosts/:id` - Get specific host details
+- ✅ `GET /status/hosts/:id/services` - List host services
+- ✅ `GET /events/list` - Query events with pagination
+- ✅ `GET /events/get/:id` - Get specific event details
+- ✅ `GET /admin/hosts` - Administrative host management
 
-To connect your Monit agents to cmonit:
+### Security & Production
+- ✅ HTTP Basic Authentication for web UI
+- ✅ TLS/HTTPS support with certificate configuration
+- ✅ Configurable listen addresses (IPv4/IPv6)
+- ✅ Syslog integration for daemon logging
+- ✅ PID file management
+- ✅ FreeBSD rc.d integration
+
+---
+
+## Development Workflow
+
+### Building
 
 ```bash
-# Edit your monitrc file
-sudo vi /usr/local/etc/monitrc
+# Standard build
+go build -o cmonit ./cmd/cmonit
 
-# Add collector configuration:
-set mmonit http://monit:monit@cmonit-server:8080/collector
-
-# Reload monit:
-sudo monit reload
+# With version info
+go build -ldflags "-X main.version=1.0.0" -o cmonit ./cmd/cmonit
 ```
 
----
-
-## Expected Workflow
-
-### Day 1-2: Phase 1 (Collector)
+### Testing
 
 ```bash
-# Morning: Setup + T1.1-T1.6
-git checkout -b phase1-collector
-# Write basic HTTP server
-# Implement authentication
-# Create database schema
-# Test T1.1-T1.6
+# Run all tests
+go test ./...
 
-# Afternoon: T1.7-T1.16
-# Implement XML parser
-# Connect to database
-# Store parsed data
-# Test T1.7-T1.16
+# Run with coverage
+go test -cover ./...
 
-# End of day:
-# ✅ All Phase 1 tests pass
-# ✅ Real Monit data flowing into SQLite
-git commit -m "Phase 1: Collector daemon complete"
+# Specific package
+go test ./internal/parser/
 ```
 
-### Day 3-4: Phase 2 (Dashboard)
+### Local Development
 
 ```bash
-git checkout -b phase2-dashboard
-# Create web server
-# Build HTML templates
-# Query database for display
-# Add Tailwind CSS
-# Implement auto-refresh
-# Test T2.1-T2.10
+# Development mode (current directory)
+./cmonit -db ./cmonit.db -pidfile ./cmonit.pid -web localhost:3000
 
-# End of day:
-# ✅ All Phase 2 tests pass
-# ✅ Web dashboard showing live data
-git commit -m "Phase 2: Web dashboard complete"
+# Clean start
+rm -f cmonit.db cmonit.db-* cmonit.pid
+go build -o cmonit ./cmd/cmonit && ./cmonit
 ```
 
-### Day 5-6: Phase 3 (Graphs)
+---
+
+## Database Schema
+
+The database uses schema versioning with automatic migrations:
+
+### Core Tables
+
+**hosts** - Monitored host information
+- Platform details (OS, CPU count, memory)
+- Monit daemon information (version, uptime)
+- HTTP API credentials for actions
+- Last seen timestamp for staleness detection
+
+**services** - Services monitored on each host
+- Service type, status, and monitoring state
+- Resource usage (CPU%, memory%, PID for processes)
+- Associated with host via `host_id` foreign key
+
+**metrics** - Time-series system metrics
+- System CPU, memory, swap, load average
+- Per-process CPU and memory usage
+- Indexed by `(host_id, collected_at)` for fast queries
+
+**events** - Service state change events
+- Automatic logging on status changes
+- Monit restart detection
+- Event types defined in `monit-xml-reference.md`
+
+**schema_version** - Schema migration tracking
+- Current version number
+- Applied timestamp
+
+---
+
+## API Endpoints
+
+### Dashboard Web UI
+
+- `GET /` - Status overview (all hosts)
+- `GET /host/{id}` - Host details with graphs
+- `GET /host/{id}/events` - Host event history
+- `GET /api/metrics?host={id}&range={1h|6h|24h}` - Metrics for graphs
+- `POST /api/action` - Execute service actions
+
+### Collector
+
+- `POST /collector` - Receive Monit XML status (Basic Auth: monit:monit)
+
+### M/Monit Compatibility API
+
+All endpoints return JSON:
+
+- `GET /status/hosts` - List hosts with summary
+- `GET /status/hosts/{id}` - Host details
+- `GET /status/hosts/{id}/services` - Service list
+- `GET /events/list?limit=N&offset=N` - Paginated events
+- `GET /events/get/{id}` - Single event
+- `GET /admin/hosts` - Administrative host list
+
+See `internal/web/mmonit_api.go` for implementation details.
+
+---
+
+## Configuration Options
+
+All configuration via command-line flags:
+
+```
+-collector    Collector listen address (default ":8080")
+-web          Web UI listen address (default "localhost:3000")
+-db           Database path (default "/var/run/cmonit/cmonit.db")
+-pidfile      PID file path (default "/var/run/cmonit/cmonit.pid")
+-syslog       Syslog facility (daemon, local0-7, empty for stderr)
+-web-user     HTTP Basic Auth username (empty = disabled)
+-web-password HTTP Basic Auth password
+-web-cert     TLS certificate file (empty = HTTP only)
+-web-key      TLS key file
+```
+
+---
+
+## Performance Characteristics
+
+Based on testing with 2 hosts, 13 services:
+
+- **Collector latency:** ~10ms to receive and store Monit XML
+- **Dashboard load:** <200ms for status overview
+- **Host detail page:** <300ms with graphs
+- **Graph rendering:** <500ms for 24h of metrics
+- **Memory usage:** ~20MB RSS
+- **Database size:** ~1-2MB per day per host
+
+---
+
+## FreeBSD Deployment
 
 ```bash
-git checkout -b phase3-graphs
-# Create graph templates
-# Implement time-series queries
-# Integrate Chart.js
-# Add time range selectors
-# Test T3.1-T3.15
+# Install binary and rc.d script
+sudo cp cmonit /usr/local/bin/
+sudo cp rc.d/cmonit /usr/local/etc/rc.d/
+sudo chmod +x /usr/local/etc/rc.d/cmonit
 
-# End of day:
-# ✅ All Phase 3 tests pass
-# ✅ Beautiful time-series graphs
-git commit -m "Phase 3: Time-series graphs complete"
+# Configure in rc.conf
+sudo sysrc cmonit_enable="YES"
+sudo sysrc cmonit_web="0.0.0.0:3000"
+sudo sysrc cmonit_syslog="daemon"
+
+# Start service
+sudo service cmonit start
 ```
 
----
-
-## Implementation Status
-
-All core features have been successfully implemented:
-
-1. ✅ **Collector Daemon** - Receives data from Monit agents
-2. ✅ **SQLite Database** - Stores current status + historical metrics with WAL mode
-3. ✅ **Multi-page Dashboard** - Status overview, host details, events pages
-4. ✅ **Time-series Graphs** - CPU, memory, load average visualization
-5. ✅ **Service Control** - Start, stop, restart, monitor, unmonitor actions
-6. ✅ **Event Tracking** - Service state changes and Monit restart detection
-7. ✅ **Security Features** - HTTP Basic Authentication and TLS/HTTPS support
-8. ✅ **Syslog Integration** - Production-ready logging
-9. ✅ **FreeBSD Support** - rc.d startup script included
-10. ✅ **Single Binary** - Self-contained deployment
+See `rc.d/cmonit` for all configuration options.
 
 ---
 
-## Performance Targets
+## Known Limitations
 
-- **API Response:** < 100ms
-- **Dashboard Load:** < 500ms
-- **Graph Render:** < 2s (24h of data)
-- **Memory Usage:** < 50 MB
-- **Database Size:** ~1 MB per day per host
-
----
-
-## Documentation Quality
-
-All documentation is:
-- ✅ Clear and concise
-- ✅ Includes examples
-- ✅ Step-by-step instructions
-- ✅ Covers all phases
-- ✅ Includes testing strategy
-- ✅ Addresses your specific questions
+1. **M/Monit API**: Partial implementation - read-only status/events queries only
+2. **Multi-user auth**: Only single username/password for web UI
+3. **HTTPS collector**: Collector endpoint is HTTP only (agents use HTTP Basic Auth)
+4. **Push-only**: No active polling of Monit agents (by design)
 
 ---
 
-## Getting Started
+## Contributing
 
-Ready to deploy cmonit? Here's the quick start guide:
+When contributing code:
 
-1. **Build the binary**
-   ```bash
-   go build -o cmonit ./cmd/cmonit
-   ```
-
-2. **Run cmonit**
-   ```bash
-   # Default configuration
-   ./cmonit
-
-   # Production configuration with authentication and TLS
-   ./cmonit -web 0.0.0.0:3000 \
-     -web-user admin -web-password your-password \
-     -web-cert /path/to/cert.pem -web-key /path/to/key.pem \
-     -syslog daemon
-   ```
-
-3. **Configure Monit agents**
-   ```bash
-   # Add to /usr/local/etc/monitrc
-   set mmonit http://monit:monit@cmonit-server:8080/collector
-
-   # Reload Monit
-   sudo monit reload
-   ```
-
-4. **Access the dashboard**
-   - Open your browser to http://localhost:3000/ (or your configured address)
-   - View status overview, host details, and events
-
----
-
-## Questions or Issues?
-
-If you have questions or need clarification:
-1. Check the relevant documentation file
-2. Review the Monit source code (`/usr/home/olivier/monit-5.35.2/`)
-3. Test with your running Monit agent
-4. Ask for help if stuck!
+1. Follow the [Coding Standards](coding-standards.md) for documentation
+2. Add tests for new features
+3. Update relevant docs when adding features
+4. Test with actual Monit agents, not just mock data
 
 ---
 
 ## License
 
-BSD 2-Clause License (see LICENSE file)
+BSD 2-Clause License - See [LICENSE](../LICENSE) file
 
 ---
 
-## Project Status
+## Additional Resources
 
-**cmonit is complete and production-ready!**
-
-All core features have been implemented and tested. The system provides a comprehensive monitoring solution for Monit with:
-- Real-time status monitoring across multiple hosts
-- Time-series graphs for system metrics
-- Service control capabilities
-- Event tracking and alerting
-- Production-ready security features
-
-For detailed usage instructions, see the main [README.md](../README.md) in the project root.
+- [Monit Official Documentation](https://mmonit.com/monit/documentation/)
+- [M/Monit HTTP API](https://mmonit.com/documentation/http-api/)
+- [Monit XML Format](monit-xml-reference.md)
+- [Testing Strategy](testing-plan.md)

@@ -133,14 +133,10 @@ func getStatusData() (*StatusData, error) {
 		// Calculate overall host status based on services and staleness
 		calculateHostStatus(&hostStatus, services)
 
-		// Get system CPU and memory from the "system" service (type 5)
-		for _, svc := range services {
-			if svc.Type == 5 { // System service
-				hostStatus.CPUPercent = svc.CPUPercent
-				hostStatus.MemoryPercent = svc.MemoryPercent
-				break
-			}
-		}
+		// Get system CPU and memory from the metrics table
+		cpuPercent, memPercent := getSystemMetrics(hostStatus.ID, hostStatus.Hostname)
+		hostStatus.CPUPercent = cpuPercent
+		hostStatus.MemoryPercent = memPercent
 
 		// Get event count for this host
 		hostStatus.EventCount, err = getEventCount(hostStatus.ID)
@@ -413,4 +409,56 @@ func getEventTypeName(eventType int) string {
 	default:
 		return fmt.Sprintf("Unknown (0x%X)", eventType)
 	}
+}
+
+// getSystemMetrics retrieves the latest CPU and memory metrics for a host.
+//
+// Returns CPU and memory percentages from the metrics table.
+// CPU is calculated as the sum of user + system + nice + wait.
+// Memory is retrieved directly from the 'percent' metric.
+//
+// Returns nil pointers if metrics are not available.
+func getSystemMetrics(hostID, hostname string) (*float64, *float64) {
+	// Query for the most recent CPU metrics (user, system, nice, wait)
+	// We need to sum these to get total CPU usage
+	const cpuQuery = `
+		SELECT
+			SUM(CASE WHEN metric_name = 'user' THEN value ELSE 0 END) +
+			SUM(CASE WHEN metric_name = 'system' THEN value ELSE 0 END) +
+			SUM(CASE WHEN metric_name = 'nice' THEN value ELSE 0 END) +
+			SUM(CASE WHEN metric_name = 'wait' THEN value ELSE 0 END) as total_cpu
+		FROM metrics
+		WHERE host_id = ? AND service_name = ? AND metric_type = 'cpu'
+		AND collected_at = (
+			SELECT MAX(collected_at)
+			FROM metrics
+			WHERE host_id = ? AND metric_type = 'cpu'
+		)
+	`
+
+	var cpuPercent float64
+	err := db.QueryRow(cpuQuery, hostID, hostname, hostID).Scan(&cpuPercent)
+	if err != nil {
+		// If no CPU data found, return nil
+		cpuPercent = 0
+	}
+
+	// Query for memory percentage
+	const memQuery = `
+		SELECT value
+		FROM metrics
+		WHERE host_id = ? AND service_name = ?
+		  AND metric_type = 'memory' AND metric_name = 'percent'
+		ORDER BY collected_at DESC
+		LIMIT 1
+	`
+
+	var memPercent float64
+	err = db.QueryRow(memQuery, hostID, hostname).Scan(&memPercent)
+	if err != nil {
+		// If no memory data found, return nil
+		return &cpuPercent, nil
+	}
+
+	return &cpuPercent, &memPercent
 }

@@ -75,7 +75,7 @@
                         <!-- CPU % -->
                         <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                             {{if .CPUPercent}}
-                                {{printf "%.1f%%" .CPUPercent}}
+                                {{printf "%.1f%%" (deref .CPUPercent)}}
                             {{else}}
                                 N/A
                             {{end}}
@@ -84,7 +84,7 @@
                         <!-- Memory % -->
                         <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                             {{if .MemoryPercent}}
-                                {{printf "%.1f%%" .MemoryPercent}}
+                                {{printf "%.1f%%" (deref .MemoryPercent)}}
                             {{else}}
                                 N/A
                             {{end}}

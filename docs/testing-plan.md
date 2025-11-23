@@ -835,9 +835,347 @@ netstat -an | grep 3000
 
 ---
 
-## Phase 4: API Compatibility Tests
+## Phase 4: M/Monit API Compatibility Tests
 
-(To be detailed when starting Phase 4)
+### Test Environment
+- cmonit running with active hosts and services
+- Historical event data available
+- Test data from Phases 1-3
+
+### T4.1: Status API - List All Hosts
+**Description**: Verify GET /status/hosts returns host summary
+
+**Steps**:
+1. Send GET request to /status/hosts
+2. Verify response format matches M/Monit API
+
+**Command**:
+```bash
+curl -s http://localhost:3000/status/hosts | python3 -m json.tool
+```
+
+**Expected**:
+- HTTP 200 OK
+- JSON array of host objects
+- Each host has: id, hostname, status, services, platform, lastseen, monituptime, cpupercent, mempercent
+- Platform string format: "FreeBSD 16.0-CURRENT (amd64)"
+
+**Status**: ⬜ Not started
+
+---
+
+### T4.2: Status API - Get Specific Host
+**Description**: Verify GET /status/hosts/{id} returns detailed host info
+
+**Steps**:
+1. Get host ID from /status/hosts
+2. Request specific host details
+3. Verify complete host information returned
+
+**Command**:
+```bash
+curl -s http://localhost:3000/status/hosts/bigone-0 | python3 -m json.tool
+```
+
+**Expected**:
+- HTTP 200 OK
+- JSON object with detailed host information
+- Includes: platform details, Monit version, uptime, incarnation
+- System metrics included
+
+**Status**: ⬜ Not started
+
+---
+
+### T4.3: Status API - List Host Services
+**Description**: Verify GET /status/hosts/{id}/services returns all services
+
+**Steps**:
+1. Request services for a host
+2. Verify all monitored services are returned
+
+**Command**:
+```bash
+curl -s http://localhost:3000/status/hosts/bigone-0/services | python3 -m json.tool
+```
+
+**Expected**:
+- HTTP 200 OK
+- JSON array of service objects
+- Each service has: name, type, status, monitor state
+- Process services include: pid, ppid, memory, cpu
+- Filesystem services include: blocks, blockstotal, percent
+
+**Status**: ⬜ Not started
+
+---
+
+### T4.4: Events API - List All Events
+**Description**: Verify GET /events/list returns event history
+
+**Steps**:
+1. Request events list
+2. Verify events are returned in reverse chronological order
+
+**Command**:
+```bash
+curl -s http://localhost:3000/events/list | python3 -m json.tool
+```
+
+**Expected**:
+- HTTP 200 OK
+- JSON object with records array and record count
+- Events sorted by timestamp (newest first)
+- Each event has: id, hostname, service, event_type, message, timestamp
+
+**Status**: ⬜ Not started
+
+---
+
+### T4.5: Events API - Pagination
+**Description**: Verify events API supports limit and offset parameters
+
+**Steps**:
+1. Request events with limit=5
+2. Request next page with offset=5
+3. Verify different records returned
+
+**Commands**:
+```bash
+curl -s "http://localhost:3000/events/list?limit=5&offset=0" | python3 -m json.tool
+curl -s "http://localhost:3000/events/list?limit=5&offset=5" | python3 -m json.tool
+```
+
+**Expected**:
+- First request returns first 5 events
+- Second request returns next 5 events
+- No duplicate events between pages
+- Record count matches total events
+
+**Status**: ⬜ Not started
+
+---
+
+### T4.6: Events API - Get Specific Event
+**Description**: Verify GET /events/get/{id} returns single event
+
+**Steps**:
+1. Get event ID from events list
+2. Request specific event details
+3. Verify complete event information returned
+
+**Command**:
+```bash
+curl -s http://localhost:3000/events/get/1 | python3 -m json.tool
+```
+
+**Expected**:
+- HTTP 200 OK
+- JSON object with single event
+- Complete event details including all fields
+
+**Status**: ⬜ Not started
+
+---
+
+### T4.7: Admin API - Host Management
+**Description**: Verify GET /admin/hosts returns administrative host list
+
+**Steps**:
+1. Request admin hosts list
+2. Verify format matches M/Monit API
+
+**Command**:
+```bash
+curl -s http://localhost:3000/admin/hosts | python3 -m json.tool
+```
+
+**Expected**:
+- HTTP 200 OK
+- JSON object with records array and record count
+- Each host includes: id, hostname, platform, services count
+- Administrative fields included
+
+**Status**: ⬜ Not started
+
+---
+
+### T4.8: API Error Handling - Invalid Host ID
+**Description**: Verify API returns proper error for non-existent host
+
+**Steps**:
+1. Request non-existent host
+2. Verify appropriate error response
+
+**Command**:
+```bash
+curl -i -s http://localhost:3000/status/hosts/nonexistent-999
+```
+
+**Expected**:
+- HTTP 404 Not Found OR HTTP 200 with empty data
+- JSON response with error message (if applicable)
+- No server crash
+
+**Status**: ⬜ Not started
+
+---
+
+### T4.9: API Error Handling - Invalid Event ID
+**Description**: Verify API returns proper error for non-existent event
+
+**Steps**:
+1. Request non-existent event
+2. Verify appropriate error response
+
+**Command**:
+```bash
+curl -i -s http://localhost:3000/events/get/999999
+```
+
+**Expected**:
+- HTTP 404 Not Found OR HTTP 200 with empty data
+- JSON response with error message (if applicable)
+- No server crash
+
+**Status**: ⬜ Not started
+
+---
+
+### T4.10: API Content-Type Headers
+**Description**: Verify all API endpoints return proper JSON content-type
+
+**Steps**:
+1. Check headers for each endpoint
+2. Verify Content-Type is application/json
+
+**Command**:
+```bash
+curl -I http://localhost:3000/status/hosts
+curl -I http://localhost:3000/events/list
+curl -I http://localhost:3000/admin/hosts
+```
+
+**Expected**:
+```
+Content-Type: application/json
+```
+
+**Status**: ⬜ Not started
+
+---
+
+### T4.11: API Response Time
+**Description**: Verify API endpoints respond quickly
+
+**Steps**:
+1. Measure response time for each endpoint
+2. Verify acceptable latency
+
+**Command**:
+```bash
+time curl -s http://localhost:3000/status/hosts > /dev/null
+time curl -s http://localhost:3000/events/list > /dev/null
+```
+
+**Expected**:
+- /status/hosts: < 100ms
+- /events/list: < 200ms
+- No database deadlocks
+- Consistent performance
+
+**Status**: ⬜ Not started
+
+---
+
+### T4.12: API with Authentication
+**Description**: Verify API respects web authentication settings
+
+**Steps**:
+1. Start cmonit with -web-user and -web-password
+2. Test API access without credentials
+3. Test API access with credentials
+
+**Commands**:
+```bash
+# Start with auth
+./cmonit -web-user admin -web-password test
+
+# Without credentials (should fail)
+curl -i http://localhost:3000/status/hosts
+
+# With credentials (should succeed)
+curl -i -u admin:test http://localhost:3000/status/hosts
+```
+
+**Expected**:
+- Without credentials: HTTP 401 Unauthorized
+- With credentials: HTTP 200 OK with JSON data
+
+**Status**: ⬜ Not started
+
+---
+
+### T4.13: API Integration - M/Monit Client
+**Description**: Verify actual M/Monit or compatible client can connect
+
+**Steps**:
+1. Configure M/Monit or compatible tool
+2. Point it to cmonit API endpoints
+3. Verify data displays correctly
+
+**Expected**:
+- Client successfully connects
+- Host and service data displays
+- Events are visible
+- No compatibility errors
+
+**Status**: ⬜ Not started
+
+---
+
+### T4.14: API Concurrent Requests
+**Description**: Verify API handles multiple simultaneous requests
+
+**Steps**:
+1. Send multiple concurrent API requests
+2. Verify all return correct data
+3. Check for race conditions
+
+**Command**:
+```bash
+for i in {1..10}; do
+  curl -s http://localhost:3000/status/hosts > /dev/null &
+done
+wait
+```
+
+**Expected**:
+- All requests succeed
+- No database lock errors
+- No corrupted responses
+- Consistent data across requests
+
+**Status**: ⬜ Not started
+
+---
+
+### T4.15: API Data Consistency
+**Description**: Verify API returns same data as web UI
+
+**Steps**:
+1. Get host data from /status/hosts API
+2. View same host in web UI
+3. Compare values
+
+**Expected**:
+- CPU% matches between API and UI
+- Memory% matches between API and UI
+- Service counts match
+- Timestamps consistent
+- Platform strings identical
+
+**Status**: ⬜ Not started
 
 ---
 

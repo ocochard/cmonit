@@ -290,6 +290,7 @@ type Service struct {
 	EUID     *int           `xml:"euid,omitempty"`
 	GID      *int           `xml:"gid,omitempty"`
 	Uptime   *int64         `xml:"uptime,omitempty"`
+	Boottime *int64         `xml:"boottime,omitempty"` // System boot time (Unix timestamp)
 	Threads  *int           `xml:"threads,omitempty"`
 	Children *int           `xml:"children,omitempty"`
 	Memory   *ProcessMemory `xml:"memory,omitempty"`

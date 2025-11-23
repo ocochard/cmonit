@@ -4,6 +4,7 @@
 
 - **[Project Plan](project-plan.md)** - Complete project roadmap, phases, and architecture
 - **[Monit Collector Protocol](monit-collector-protocol.md)** - Technical details of Monit→M/Monit communication
+- **[Monit XML Reference](monit-xml-reference.md)** - Complete reference of all Monit XML fields (used and unused)
 - **[Testing Plan](testing-plan.md)** - Detailed acceptance tests for each phase
 - **[Coding Standards](coding-standards.md)** - Educational commenting guidelines (MUST READ!)
 

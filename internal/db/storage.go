@@ -25,6 +25,8 @@ import (
 // Parameters:
 //   - db: Database connection (from InitDB)
 //   - server: Server information from parsed XML
+//   - platform: Platform information (OS, hardware specs)
+//   - systemService: System service with uptime/boottime (can be nil)
 //
 // Returns:
 //   - error: nil if successful, error describing problem if failed
@@ -35,7 +37,7 @@ import (
 // 3. Preserve created_at for existing hosts
 //
 // Thread-safety: Safe to call from multiple goroutines (database/sql handles locking)
-func StoreHost(db *sql.DB, server *parser.Server) error {
+func StoreHost(db *sql.DB, server *parser.Server, platform *parser.Platform, systemService *parser.Service) error {
 	// Generate an ID if Monit doesn't provide one
 	//
 	// Monit only sends an <id> field if "set idfile" is configured.
@@ -80,9 +82,27 @@ func StoreHost(db *sql.DB, server *parser.Server) error {
 			http_ssl,
 			http_username,
 			http_password,
+			os_name,
+			os_release,
+			os_version,
+			machine,
+			cpu_count,
+			total_memory,
+			total_swap,
+			system_uptime,
+			boottime,
 			last_seen,
 			created_at
 		) VALUES (
+			?,
+			?,
+			?,
+			?,
+			?,
+			?,
+			?,
+			?,
+			?,
 			?,
 			?,
 			?,
@@ -105,23 +125,26 @@ func StoreHost(db *sql.DB, server *parser.Server) error {
 	// We'll use this for last_seen and created_at
 	now := time.Now()
 
+	// Extract system uptime and boottime if available
+	// These fields are in the system service (type 5)
+	var systemUptime *int64
+	var boottime *int64
+	if systemService != nil && systemService.Type == 5 {
+		if systemService.Uptime != nil {
+			systemUptime = systemService.Uptime
+		}
+		if systemService.Boottime != nil {
+			boottime = systemService.Boottime
+		}
+	}
+
 	// Execute the SQL query
 	//
 	// db.Exec() runs a query that doesn't return rows (INSERT, UPDATE, DELETE)
 	//
-	// The ? placeholders are replaced with the values in order:
-	//   1st ? = hostID (generated or from server.ID)
-	//   2nd ? = server.LocalHostname
-	//   3rd ? = server.Incarnation
-	//   4th ? = server.Version
-	//   5th ? = server.HTTPD.Address (Monit HTTP server address)
-	//   6th ? = server.HTTPD.Port (Monit HTTP server port)
-	//   7th ? = server.HTTPD.SSL (SSL enabled flag)
-	//   8th ? = server.Credentials.Username (HTTP auth username)
-	//   9th ? = server.Credentials.Password (HTTP auth password)
-	//   10th ? = now (last_seen)
-	//   11th ? = hostID (for the COALESCE subquery)
-	//   12th ? = now (created_at if new host)
+	// The ? placeholders are replaced with the values in order.
+	// Platform information is from the platform parameter.
+	// System uptime/boottime is from the system service (type 5) if available.
 	//
 	// Why use placeholders instead of string formatting?
 	// - Prevents SQL injection attacks
@@ -144,6 +167,15 @@ func StoreHost(db *sql.DB, server *parser.Server) error {
 		server.HTTPD.SSL,
 		server.Credentials.Username,
 		server.Credentials.Password,
+		platform.Name,
+		platform.Release,
+		platform.Version,
+		platform.Machine,
+		platform.CPU,
+		platform.Memory,
+		platform.Swap,
+		systemUptime,
+		boottime,
 		now,
 		hostID,
 		now,
@@ -203,9 +235,13 @@ func StoreService(db *sql.DB, hostID string, service *parser.Service) error {
 			type,
 			status,
 			monitor,
+			pid,
+			cpu_percent,
+			memory_percent,
+			memory_kb,
 			collected_at,
 			last_seen
-		) VALUES (?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
 	// Get the collection timestamp from the service
@@ -216,6 +252,22 @@ func StoreService(db *sql.DB, hostID string, service *parser.Service) error {
 	// Current time for last_seen
 	now := time.Now()
 
+	// Extract process metrics if this is a process service (type 3)
+	var pid *int
+	var cpuPercent *float64
+	var memoryPercent *float64
+	var memoryKB *int64
+	if service.Type == 3 {
+		pid = service.PID
+		if service.CPU != nil {
+			cpuPercent = &service.CPU.Percent
+		}
+		if service.Memory != nil {
+			memoryPercent = &service.Memory.Percent
+			memoryKB = &service.Memory.Kilobyte
+		}
+	}
+
 	// Execute the query
 	_, err := db.Exec(
 		query,
@@ -224,6 +276,10 @@ func StoreService(db *sql.DB, hostID string, service *parser.Service) error {
 		service.Type,        // Service type (0-8, see parser.Service docs)
 		service.Status,      // Current status (0=OK, 1=failed, etc.)
 		service.Monitor,     // Monitoring state (0=not monitored, 1=monitored, 2=init)
+		pid,                 // Process ID (for process services)
+		cpuPercent,          // CPU usage % (for process services)
+		memoryPercent,       // Memory usage % (for process services)
+		memoryKB,            // Memory usage in KB (for process services)
 		collectedAt,         // When Monit collected this data
 		now,                 // When we received/processed it
 	)
@@ -528,17 +584,27 @@ func StoreMonitStatus(db *sql.DB, status *parser.MonitStatus) error {
 		log.Printf("[INFO] Generated host ID: %s (no idfile configured in Monit)", hostID)
 	}
 
-	// Step 1: Store the host information
+	// Step 1: Find the system service (type 5) for uptime/boottime
+	var systemService *parser.Service
+	for i := range status.Services {
+		if status.Services[i].Type == 5 {
+			systemService = &status.Services[i]
+			break
+		}
+	}
+
+	// Step 2: Store the host information
 	//
 	// This creates or updates the host record in the hosts table.
-	// The host record contains: ID, hostname, version, incarnation, last_seen.
-	err := StoreHost(db, &status.Server)
+	// The host record contains: ID, hostname, version, incarnation, last_seen,
+	// plus platform information (OS, architecture, hardware specs).
+	err := StoreHost(db, &status.Server, &status.Platform, systemService)
 	if err != nil {
 		// If we can't store the host, don't bother with services/metrics
 		return fmt.Errorf("failed to store host: %w", err)
 	}
 
-	// Step 2: Store all services
+	// Step 3: Store all services
 	//
 	// Loop through each service in the status update.
 	// For each service:

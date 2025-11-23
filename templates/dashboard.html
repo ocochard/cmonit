@@ -14,18 +14,56 @@
         {{if .Hosts}}
             {{range $host := .Hosts}}
             <div class="bg-white rounded-lg shadow-md mb-6">
-                <div class="bg-blue-600 text-white px-6 py-4 rounded-t-lg flex justify-between">
-                    <div>
-                        <h2 class="text-2xl font-semibold">{{$host.Hostname}}</h2>
-                        <p class="text-sm">Monit {{$host.Version}}</p>
+                <div class="bg-blue-600 text-white px-6 py-4 rounded-t-lg">
+                    <div class="flex justify-between items-start mb-2">
+                        <div>
+                            <h2 class="text-2xl font-semibold">{{$host.Hostname}}</h2>
+                            <p class="text-sm opacity-90">Monit {{$host.Version}}</p>
+                        </div>
+                        <div>
+                            {{if $host.IsStale}}
+                            <span class="bg-red-500 px-3 py-1 rounded-full text-sm font-semibold">STALE</span>
+                            {{else}}
+                            <span class="bg-green-500 px-3 py-1 rounded-full text-sm font-semibold">ACTIVE</span>
+                            {{end}}
+                        </div>
                     </div>
-                    <div>
-                        {{if $host.IsStale}}
-                        <span class="bg-red-500 px-3 py-1 rounded-full text-sm">STALE</span>
-                        {{else}}
-                        <span class="bg-green-500 px-3 py-1 rounded-full text-sm">ACTIVE</span>
+
+                    <!-- Platform Information -->
+                    {{if $host.OSName}}
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4 pt-4 border-t border-blue-500">
+                        <div>
+                            <div class="text-xs opacity-75 uppercase">Platform</div>
+                            <div class="text-sm font-semibold">{{$host.OSName}} {{$host.OSRelease}}</div>
+                            <div class="text-xs opacity-90">{{$host.Machine}}</div>
+                        </div>
+                        {{if gt $host.CPUCount 0}}
+                        <div>
+                            <div class="text-xs opacity-75 uppercase">CPUs</div>
+                            <div class="text-lg font-bold">{{$host.CPUCount}}</div>
+                            <div class="text-xs opacity-90">cores</div>
+                        </div>
+                        {{end}}
+                        {{if gt $host.TotalMemory 0}}
+                        <div>
+                            <div class="text-xs opacity-75 uppercase">Memory</div>
+                            <div class="text-lg font-bold">{{printf "%.1f" (divf $host.TotalMemory 1048576.0)}} GB</div>
+                            {{if gt $host.TotalSwap 0}}
+                            <div class="text-xs opacity-90">{{printf "%.1f" (divf $host.TotalSwap 1048576.0)}} GB swap</div>
+                            {{end}}
+                        </div>
+                        {{end}}
+                        {{if $host.SystemUptime}}
+                        <div>
+                            <div class="text-xs opacity-75 uppercase">Uptime</div>
+                            <div class="text-sm font-semibold">{{formatDuration $host.SystemUptime}}</div>
+                            {{if $host.Boottime}}
+                            <div class="text-xs opacity-90">since {{formatTimestamp $host.Boottime}}</div>
+                            {{end}}
+                        </div>
                         {{end}}
                     </div>
+                    {{end}}
                 </div>
 
                 <div class="px-6 py-4">
@@ -37,21 +75,48 @@
                                 <th class="text-left py-2 px-4">Type</th>
                                 <th class="text-left py-2 px-4">Status</th>
                                 <th class="text-left py-2 px-4">Monitor</th>
+                                <th class="text-right py-2 px-4">PID</th>
+                                <th class="text-right py-2 px-4">CPU</th>
+                                <th class="text-right py-2 px-4">Memory</th>
                                 <th class="text-left py-2 px-4">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             {{range $service := $host.Services}}
-                            <tr class="border-b">
-                                <td class="py-2 px-4">{{$service.Name}}</td>
-                                <td class="py-2 px-4">{{$service.TypeName}}</td>
+                            <tr class="border-b hover:bg-gray-50">
+                                <td class="py-2 px-4 font-medium">{{$service.Name}}</td>
+                                <td class="py-2 px-4 text-sm text-gray-600">{{$service.TypeName}}</td>
                                 <td class="py-2 px-4">
                                     <span class="px-2 py-1 rounded text-xs {{if eq $service.Status 0}}bg-green-500{{else if eq $service.Status 1}}bg-yellow-500{{else}}bg-red-500{{end}} text-white">
                                         {{$service.StatusName}}
                                     </span>
                                 </td>
-                                <td class="py-2 px-4">
-                                    {{if eq $service.Monitor 1}}Yes{{else}}No{{end}}
+                                <td class="py-2 px-4 text-sm">
+                                    {{if eq $service.Monitor 1}}
+                                    <span class="text-green-600">●</span> Yes
+                                    {{else}}
+                                    <span class="text-gray-400">○</span> No
+                                    {{end}}
+                                </td>
+                                <td class="py-2 px-4 text-right text-sm font-mono">
+                                    {{if $service.PID}}{{$service.PID}}{{else}}<span class="text-gray-400">-</span>{{end}}
+                                </td>
+                                <td class="py-2 px-4 text-right text-sm">
+                                    {{if $service.CPUPercent}}
+                                    <span class="{{if gt (deref $service.CPUPercent) 50.0}}text-red-600 font-semibold{{else if gt (deref $service.CPUPercent) 20.0}}text-yellow-600{{else}}text-gray-700{{end}}">
+                                        {{printf "%.1f" (deref $service.CPUPercent)}}%
+                                    </span>
+                                    {{else}}<span class="text-gray-400">-</span>{{end}}
+                                </td>
+                                <td class="py-2 px-4 text-right text-sm">
+                                    {{if $service.MemoryPercent}}
+                                    <span class="{{if gt (deref $service.MemoryPercent) 50.0}}text-red-600 font-semibold{{else if gt (deref $service.MemoryPercent) 20.0}}text-yellow-600{{else}}text-gray-700{{end}}">
+                                        {{printf "%.1f" (deref $service.MemoryPercent)}}%
+                                    </span>
+                                    {{if $service.MemoryKB}}
+                                    <span class="text-xs text-gray-500 block">{{printf "%.0f" (divf $service.MemoryKB 1024.0)}} MB</span>
+                                    {{end}}
+                                    {{else}}<span class="text-gray-400">-</span>{{end}}
                                 </td>
                                 <td class="py-2 px-4">
                                     <div class="flex gap-1">

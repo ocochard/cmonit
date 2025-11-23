@@ -10,6 +10,7 @@ package web
 
 import (
 	"database/sql"  // Database access
+	"fmt"           // String formatting
 	"html/template" // HTML templating
 	"log"           // Logging
 	"net/http"      // HTTP server
@@ -33,26 +34,38 @@ type DashboardData struct {
 //
 // This combines data from the hosts and services tables.
 type HostWithServices struct {
-	ID          string    // Unique host ID from Monit
-	Hostname    string    // Display name (e.g., "bigone")
-	Version     string    // Monit version
-	LastSeen    time.Time // Last successful update
-	Services    []Service // All services on this host
-	IsStale     bool      // True if not seen in 5+ minutes
+	ID            string    // Unique host ID from Monit
+	Hostname      string    // Display name (e.g., "bigone")
+	Version       string    // Monit version
+	OSName        string    // Operating system name
+	OSRelease     string    // OS version/release
+	Machine       string    // CPU architecture
+	CPUCount      int       // Number of CPU cores
+	TotalMemory   int64     // Total RAM in bytes
+	TotalSwap     int64     // Total swap in bytes
+	SystemUptime  *int64    // System uptime in seconds
+	Boottime      *int64    // Unix timestamp of last boot
+	LastSeen      time.Time // Last successful update
+	Services      []Service // All services on this host
+	IsStale       bool      // True if not seen in 5+ minutes
 }
 
 // Service represents a monitored service.
 //
 // Maps to the services table in the database.
 type Service struct {
-	Name        string    // Service name (e.g., "sshd", "nginx")
-	Type        int       // Service type (3=process, 5=system, 7=program)
-	TypeName    string    // Human-readable type ("Process", "System", etc.)
-	Status      int       // 0=ok, 1=warning, 2=critical
-	StatusName  string    // Human-readable status ("OK", "Warning", "Critical")
-	StatusColor string    // CSS color class ("green", "yellow", "red")
-	Monitor     int       // 0=not monitored, 1=monitored
-	CollectedAt time.Time // When metrics were last collected
+	Name          string    // Service name (e.g., "sshd", "nginx")
+	Type          int       // Service type (3=process, 5=system, 7=program)
+	TypeName      string    // Human-readable type ("Process", "System", etc.)
+	Status        int       // 0=ok, 1=warning, 2=critical
+	StatusName    string    // Human-readable status ("OK", "Warning", "Critical")
+	StatusColor   string    // CSS color class ("green", "yellow", "red")
+	Monitor       int       // 0=not monitored, 1=monitored
+	PID           *int      // Process ID (for process services)
+	CPUPercent    *float64  // CPU usage % (for process services)
+	MemoryPercent *float64  // Memory usage % (for process services)
+	MemoryKB      *int64    // Memory usage in KB (for process services)
+	CollectedAt   time.Time // When metrics were last collected
 }
 
 // =============================================================================
@@ -97,13 +110,68 @@ func SetDB(database *sql.DB) {
 //
 // Returns an error if templates can't be loaded.
 func InitTemplates() error {
-	// Parse all .html files in templates/ directory
+	// Create custom template functions
+	funcMap := template.FuncMap{
+		"divf": func(a, b interface{}) float64 {
+			// Convert interfaces to float64
+			var af, bf float64
+			switch v := a.(type) {
+			case float64:
+				af = v
+			case int:
+				af = float64(v)
+			case int64:
+				af = float64(v)
+			}
+			switch v := b.(type) {
+			case float64:
+				bf = v
+			case int:
+				bf = float64(v)
+			case int64:
+				bf = float64(v)
+			}
+			if bf == 0 {
+				return 0
+			}
+			return af / bf
+		},
+		"formatDuration": func(seconds *int64) string {
+			if seconds == nil {
+				return "N/A"
+			}
+			days := *seconds / 86400
+			hours := (*seconds % 86400) / 3600
+			minutes := (*seconds % 3600) / 60
+			if days > 0 {
+				return fmt.Sprintf("%dd %dh %dm", days, hours, minutes)
+			} else if hours > 0 {
+				return fmt.Sprintf("%dh %dm", hours, minutes)
+			}
+			return fmt.Sprintf("%dm", minutes)
+		},
+		"formatTimestamp": func(ts *int64) string {
+			if ts == nil {
+				return "N/A"
+			}
+			t := time.Unix(*ts, 0)
+			return t.Format("Jan 2, 15:04")
+		},
+		"deref": func(f *float64) float64 {
+			if f == nil {
+				return 0
+			}
+			return *f
+		},
+	}
+
+	// Parse all .html files in templates/ directory with custom functions
 	//
-	// template.ParseGlob returns:
-	// - *template.Template: The parsed templates
-	// - error: Any parsing errors
+	// template.New creates a new template with the given name
+	// .Funcs adds custom functions to the template
+	// .ParseGlob loads all matching files
 	var err error
-	templates, err = template.ParseGlob("templates/*.html")
+	templates, err = template.New("").Funcs(funcMap).ParseGlob("templates/*.html")
 	if err != nil {
 		return err
 	}
@@ -185,11 +253,15 @@ func getDashboardData() (*DashboardData, error) {
 	// - id: Unique host identifier
 	// - hostname: Display name
 	// - version: Monit version string
+	// - os_name, os_release, machine: Platform info
+	// - cpu_count, total_memory, total_swap: Hardware specs
+	// - system_uptime, boottime: System timing info
 	// - last_seen: Timestamp of last update
 	//
 	// ORDER BY last_seen DESC: Show most recently seen hosts first
 	const hostsQuery = `
-		SELECT id, hostname, version, last_seen
+		SELECT id, hostname, version, os_name, os_release, machine,
+		       cpu_count, total_memory, total_swap, system_uptime, boottime, last_seen
 		FROM hosts
 		ORDER BY last_seen DESC
 	`
@@ -225,12 +297,22 @@ func getDashboardData() (*DashboardData, error) {
 
 		// Scan copies columns from current row into variables
 		//
-		// Order must match the SELECT clause:
-		// - 1st column (id) -> host.ID
-		// - 2nd column (hostname) -> host.Hostname
-		// - 3rd column (version) -> host.Version
-		// - 4th column (last_seen) -> host.LastSeen
-		err := rows.Scan(&host.ID, &host.Hostname, &host.Version, &host.LastSeen)
+		// Order must match the SELECT clause
+		// Use pointers for optional fields (can be NULL in database)
+		err := rows.Scan(
+			&host.ID,
+			&host.Hostname,
+			&host.Version,
+			&host.OSName,
+			&host.OSRelease,
+			&host.Machine,
+			&host.CPUCount,
+			&host.TotalMemory,
+			&host.TotalSwap,
+			&host.SystemUptime,
+			&host.Boottime,
+			&host.LastSeen,
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -283,8 +365,9 @@ func getServicesForHost(hostID string) ([]Service, error) {
 	//
 	// WHERE clause filters to only this host's services
 	// ORDER BY type, name: Group by type, then alphabetically
+	// Include process metrics (pid, cpu_percent, memory_percent, memory_kb) for process services
 	const servicesQuery = `
-		SELECT name, type, status, monitor, collected_at
+		SELECT name, type, status, monitor, pid, cpu_percent, memory_percent, memory_kb, collected_at
 		FROM services
 		WHERE host_id = ?
 		ORDER BY type, name
@@ -305,7 +388,18 @@ func getServicesForHost(hostID string) ([]Service, error) {
 	for rows.Next() {
 		var svc Service
 
-		err := rows.Scan(&svc.Name, &svc.Type, &svc.Status, &svc.Monitor, &svc.CollectedAt)
+		// Scan all fields including process metrics (which may be NULL)
+		err := rows.Scan(
+			&svc.Name,
+			&svc.Type,
+			&svc.Status,
+			&svc.Monitor,
+			&svc.PID,
+			&svc.CPUPercent,
+			&svc.MemoryPercent,
+			&svc.MemoryKB,
+			&svc.CollectedAt,
+		)
 		if err != nil {
 			return nil, err
 		}

@@ -39,7 +39,7 @@ import (
 
 // currentSchemaVersion is the current database schema version.
 // Increment this when making schema changes that require migration.
-const currentSchemaVersion = 1
+const currentSchemaVersion = 2
 
 // SQL schema for the cmonit database
 //
@@ -90,6 +90,15 @@ const (
 	//   - http_ssl: Whether Monit uses HTTPS (0=no, 1=yes)
 	//   - http_username: Username for Monit HTTP authentication
 	//   - http_password: Password for Monit HTTP authentication
+	//   - os_name: Operating system name (FreeBSD, Linux, Darwin, etc.)
+	//   - os_release: OS version/release
+	//   - os_version: Full OS version string with kernel info
+	//   - machine: CPU architecture (amd64, arm64, i386)
+	//   - cpu_count: Number of CPU cores
+	//   - total_memory: Total RAM in bytes
+	//   - total_swap: Total swap space in bytes
+	//   - system_uptime: System uptime in seconds
+	//   - boottime: Unix timestamp of last boot
 	//   - last_seen: When we last received data from this host
 	//   - created_at: When we first saw this host
 	//
@@ -111,6 +120,15 @@ const (
 		http_ssl INTEGER DEFAULT 0,
 		http_username TEXT,
 		http_password TEXT,
+		os_name TEXT,
+		os_release TEXT,
+		os_version TEXT,
+		machine TEXT,
+		cpu_count INTEGER,
+		total_memory INTEGER,
+		total_swap INTEGER,
+		system_uptime INTEGER,
+		boottime INTEGER,
 		last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		UNIQUE(hostname)
@@ -129,6 +147,10 @@ const (
 	//           3=process, 4=host, 5=system, 6=fifo, 7=program, 8=net)
 	//   - status: Current status (0=running/ok, 1=failed, etc.)
 	//   - monitor: Monitoring mode (0=not monitored, 1=monitored, 2=init)
+	//   - pid: Process ID (for process services)
+	//   - cpu_percent: CPU usage percentage (for process services)
+	//   - memory_percent: Memory usage percentage (for process services)
+	//   - memory_kb: Memory usage in kilobytes (for process services)
 	//   - collected_at: When this status was collected by Monit
 	//   - last_seen: When we last received an update for this service
 	//
@@ -148,6 +170,10 @@ const (
 		type INTEGER,
 		status INTEGER,
 		monitor INTEGER,
+		pid INTEGER,
+		cpu_percent REAL,
+		memory_percent REAL,
+		memory_kb INTEGER,
 		collected_at DATETIME,
 		last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (host_id) REFERENCES hosts(id),
@@ -536,19 +562,43 @@ func migrateSchema(db *sql.DB, fromVersion, toVersion int) error {
 	// Apply migrations sequentially
 	for fromVersion < toVersion {
 		switch fromVersion {
-		// Future migrations will be added here
-		// Example:
-		// case 1:
-		//     // Migration from version 1 to version 2
-		//     _, err := db.Exec("ALTER TABLE hosts ADD COLUMN some_field TEXT")
-		//     if err != nil {
-		//         return fmt.Errorf("migration v1->v2 failed: %w", err)
-		//     }
-		//     fromVersion = 2
-		//     err = setSchemaVersion(db, fromVersion)
-		//     if err != nil {
-		//         return err
-		//     }
+		case 1:
+			// Migration from version 1 to version 2
+			// Add platform information and process metrics
+			log.Printf("[INFO] Migrating from v1 to v2: Adding platform info and process metrics")
+
+			// Add platform columns to hosts table
+			migrations := []string{
+				"ALTER TABLE hosts ADD COLUMN os_name TEXT",
+				"ALTER TABLE hosts ADD COLUMN os_release TEXT",
+				"ALTER TABLE hosts ADD COLUMN os_version TEXT",
+				"ALTER TABLE hosts ADD COLUMN machine TEXT",
+				"ALTER TABLE hosts ADD COLUMN cpu_count INTEGER",
+				"ALTER TABLE hosts ADD COLUMN total_memory INTEGER",
+				"ALTER TABLE hosts ADD COLUMN total_swap INTEGER",
+				"ALTER TABLE hosts ADD COLUMN system_uptime INTEGER",
+				"ALTER TABLE hosts ADD COLUMN boottime INTEGER",
+
+				// Add process metrics columns to services table
+				"ALTER TABLE services ADD COLUMN pid INTEGER",
+				"ALTER TABLE services ADD COLUMN cpu_percent REAL",
+				"ALTER TABLE services ADD COLUMN memory_percent REAL",
+				"ALTER TABLE services ADD COLUMN memory_kb INTEGER",
+			}
+
+			for _, migration := range migrations {
+				_, err := db.Exec(migration)
+				if err != nil {
+					return fmt.Errorf("migration v1->v2 failed on '%s': %w", migration, err)
+				}
+			}
+
+			fromVersion = 2
+			err := setSchemaVersion(db, fromVersion)
+			if err != nil {
+				return err
+			}
+			log.Printf("[INFO] Successfully migrated to schema version 2")
 
 		default:
 			return fmt.Errorf("no migration path from version %d", fromVersion)

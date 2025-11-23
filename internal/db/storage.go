@@ -739,6 +739,12 @@ func StoreMonitStatus(db *sql.DB, status *parser.MonitStatus) error {
 				log.Printf("[WARN] Failed to store filesystem metrics for %s: %v", service.Name, err)
 			}
 
+		case 8: // Network interface service
+			err = StoreNetworkMetrics(db, hostID, service)
+			if err != nil {
+				log.Printf("[WARN] Failed to store network metrics for %s: %v", service.Name, err)
+			}
+
 		// TODO: Add handlers for other service types:
 		// case 2: // File
 		// case 7: // Program
@@ -856,6 +862,97 @@ func StoreFilesystemMetrics(db *sql.DB, hostID string, service *parser.Service) 
 	if debugMode {
 		log.Printf("[DEBUG] Stored filesystem metrics for %s/%s (%.1f%% used, %s)",
 			hostID, service.Name, service.Block.Percent, getString(service.FSType))
+	}
+
+	return nil
+}
+
+// StoreNetworkMetrics stores network interface service metrics into the database.
+//
+// This function is called for network interface services (type 8) to record:
+// - Link state (up/down)
+// - Link speed (bits per second) and duplex mode
+// - Download traffic (packets, bytes, errors - current and total)
+// - Upload traffic (packets, bytes, errors - current and total)
+//
+// Parameters:
+//   - db: Database connection
+//   - hostID: Host identifier (from hosts table)
+//   - service: Parsed service data from Monit XML
+//
+// Returns:
+//   - error: nil if successful, error describing problem if failed
+func StoreNetworkMetrics(db *sql.DB, hostID string, service *parser.Service) error {
+	// Check if this is actually a network interface service
+	if service.Type != 8 {
+		// Not a network interface service, nothing to do
+		return nil
+	}
+
+	// Check if network link metrics are present
+	if service.Link == nil {
+		// No network metrics in this service (shouldn't happen for type 8, but be safe)
+		return nil
+	}
+
+	// Get the collection timestamp
+	collectedAt := service.GetCollectedTime()
+
+	// Insert network metrics into the database
+	//
+	// Using INSERT (not INSERT OR REPLACE) because:
+	// - Each metric is a new data point in time
+	// - We want to keep all historical values for graphing
+	// - Time-series data is append-only
+	query := `
+		INSERT INTO network_metrics (
+			host_id, service_name,
+			link_state, link_speed, link_duplex,
+			download_packets_now, download_packets_total,
+			download_bytes_now, download_bytes_total,
+			download_errors_now, download_errors_total,
+			upload_packets_now, upload_packets_total,
+			upload_bytes_now, upload_bytes_total,
+			upload_errors_now, upload_errors_total,
+			collected_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`
+
+	_, err := db.Exec(query,
+		hostID,
+		service.Name,
+		service.Link.State,
+		service.Link.Speed,
+		service.Link.Duplex,
+		service.Link.Download.Packets.Now,
+		service.Link.Download.Packets.Total,
+		service.Link.Download.Bytes.Now,
+		service.Link.Download.Bytes.Total,
+		service.Link.Download.Errors.Now,
+		service.Link.Download.Errors.Total,
+		service.Link.Upload.Packets.Now,
+		service.Link.Upload.Packets.Total,
+		service.Link.Upload.Bytes.Now,
+		service.Link.Upload.Bytes.Total,
+		service.Link.Upload.Errors.Now,
+		service.Link.Upload.Errors.Total,
+		collectedAt,
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to store network metrics: %w", err)
+	}
+
+	if debugMode {
+		// Convert speed from bits/sec to Mbps for display
+		speedMbps := float64(service.Link.Speed) / 1000000
+		duplexStr := "half-duplex"
+		if service.Link.Duplex == 1 {
+			duplexStr = "full-duplex"
+		}
+		log.Printf("[DEBUG] Stored network metrics for %s/%s (%.0f Mbps %s, link %s)",
+			hostID, service.Name, speedMbps, duplexStr,
+			map[int]string{0: "down", 1: "up"}[service.Link.State])
 	}
 
 	return nil

@@ -419,9 +419,9 @@ func HandleServiceDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract host ID and service name from URL path: /service/{host_id}/{service_name}
-	path := strings.TrimPrefix(r.URL.Path, "/service/")
-	parts := strings.SplitN(path, "/", 2)
+	// Extract host ID and service name from URL path: /host/{host_id}/service/{service_name}
+	path := strings.TrimPrefix(r.URL.Path, "/host/")
+	parts := strings.SplitN(path, "/service/", 2)
 
 	if len(parts) != 2 {
 		http.Error(w, "Invalid service path", http.StatusBadRequest)
@@ -566,6 +566,14 @@ func getServiceDetailData(hostID, serviceName string) (*ServiceDetailData, error
 		}
 	}
 
+	// Get network metrics if this is a network interface service (type 8)
+	if svc.Type == 8 {
+		data.NetworkData, err = getNetworkMetrics(hostID, serviceName)
+		if err != nil {
+			log.Printf("[WARN] Failed to get network metrics for %s/%s: %v", hostID, serviceName, err)
+		}
+	}
+
 	return data, nil
 }
 
@@ -626,4 +634,45 @@ func getFilesystemMetrics(hostID, serviceName string) (*FilesystemMetrics, error
 	}
 
 	return &fm, nil
+}
+
+// getNetworkMetrics retrieves the latest network interface metrics for a service.
+func getNetworkMetrics(hostID, serviceName string) (*NetworkMetrics, error) {
+	const query = `
+		SELECT link_state, link_speed, link_duplex,
+		       download_packets_now, download_packets_total,
+		       download_bytes_now, download_bytes_total,
+		       download_errors_now, download_errors_total,
+		       upload_packets_now, upload_packets_total,
+		       upload_bytes_now, upload_bytes_total,
+		       upload_errors_now, upload_errors_total
+		FROM network_metrics
+		WHERE host_id = ? AND service_name = ?
+		ORDER BY collected_at DESC
+		LIMIT 1
+	`
+
+	var nm NetworkMetrics
+	err := db.QueryRow(query, hostID, serviceName).Scan(
+		&nm.LinkState,
+		&nm.LinkSpeed,
+		&nm.LinkDuplex,
+		&nm.DownloadPacketsNow,
+		&nm.DownloadPacketsTotal,
+		&nm.DownloadBytesNow,
+		&nm.DownloadBytesTotal,
+		&nm.DownloadErrorsNow,
+		&nm.DownloadErrorsTotal,
+		&nm.UploadPacketsNow,
+		&nm.UploadPacketsTotal,
+		&nm.UploadBytesNow,
+		&nm.UploadBytesTotal,
+		&nm.UploadErrorsNow,
+		&nm.UploadErrorsTotal,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return &nm, nil
 }

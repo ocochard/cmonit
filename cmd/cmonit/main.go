@@ -297,14 +297,14 @@ func main() {
 	// Main status overview page (shows all hosts in a table)
 	webMux.HandleFunc("/", web.HandleStatus)
 
-	// Service detail pages (show detailed metrics for a specific service)
-	webMux.HandleFunc("/service/", web.HandleServiceDetail)
-
-	// Host detail pages (with graphs)
+	// Host detail pages (with graphs) and service detail pages
 	// Must be registered before "/" to match more specific paths
 	webMux.HandleFunc("/host/", func(w http.ResponseWriter, r *http.Request) {
-		// Check if this is an events page request
-		if strings.HasSuffix(r.URL.Path, "/events") {
+		// Check if this is a service detail page request
+		if strings.Contains(r.URL.Path, "/service/") {
+			web.HandleServiceDetail(w, r)
+		} else if strings.HasSuffix(r.URL.Path, "/events") {
+			// Check if this is an events page request
 			web.HandleHostEvents(w, r)
 		} else {
 			web.HandleHostDetail(w, r)

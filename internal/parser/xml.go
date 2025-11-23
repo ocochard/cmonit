@@ -313,6 +313,10 @@ type Service struct {
 	Inode    *FilesystemInode          `xml:"inode,omitempty"`
 	ReadIO   *FilesystemIO             `xml:"read,omitempty"`
 	WriteIO  *FilesystemIO             `xml:"write,omitempty"`
+
+	// Network fields (for type 8 - network interface services)
+	// Only present when Type == 8 (network interface)
+	Link     *NetworkLink              `xml:"link,omitempty"`
 }
 
 // SystemMetrics contains system-level performance metrics.
@@ -666,6 +670,63 @@ type FilesystemOperations struct {
 	Count int64 `xml:"count"`
 
 	// Total is the total number of operations since system boot
+	Total int64 `xml:"total"`
+}
+
+// NetworkLink contains network interface link information.
+//
+// Only present for network interface services (type 8).
+//
+// Example XML:
+// <link>
+//   <state>1</state>
+//   <speed>1000000000</speed>
+//   <duplex>1</duplex>
+//   <download>...</download>
+//   <upload>...</upload>
+// </link>
+type NetworkLink struct {
+	// State indicates link status
+	// 1 = up (link active)
+	// 0 = down (link inactive)
+	State int `xml:"state"`
+
+	// Speed is the link speed in bits per second
+	// 1000000000 = 1 Gbps = 1000 Mb/s
+	// 100000000 = 100 Mbps
+	// 10000000 = 10 Mbps
+	Speed int64 `xml:"speed"`
+
+	// Duplex indicates duplex mode
+	// 1 = full-duplex (can send and receive simultaneously)
+	// 0 = half-duplex (can only send OR receive at a time)
+	Duplex int `xml:"duplex"`
+
+	// Download contains download/receive statistics
+	Download NetworkTraffic `xml:"download"`
+
+	// Upload contains upload/transmit statistics
+	Upload NetworkTraffic `xml:"upload"`
+}
+
+// NetworkTraffic contains network traffic statistics (for download or upload).
+type NetworkTraffic struct {
+	// Packets contains packet statistics
+	Packets NetworkCount `xml:"packets"`
+
+	// Bytes contains byte transfer statistics
+	Bytes NetworkCount `xml:"bytes"`
+
+	// Errors contains error count statistics
+	Errors NetworkCount `xml:"errors"`
+}
+
+// NetworkCount contains current and total counts for network metrics.
+type NetworkCount struct {
+	// Now is the current rate (per second for packets/bytes, current count for errors)
+	Now int64 `xml:"now"`
+
+	// Total is the cumulative total since system boot
 	Total int64 `xml:"total"`
 }
 

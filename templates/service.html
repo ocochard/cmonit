@@ -167,6 +167,97 @@
                 </div>
                 {{end}}
 
+                {{if .NetworkData}}
+                <!-- Network Interface Metrics -->
+                <div class="border-t pt-6">
+                    <h3 class="text-xl font-semibold mb-4">Network Interface Metrics</h3>
+
+                    <!-- Link Status -->
+                    <div class="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
+                        <div>
+                            <div class="text-xs text-gray-500 uppercase mb-1">Link Status</div>
+                            <span class="px-3 py-1 rounded text-sm {{if eq .NetworkData.LinkState 1}}bg-green-500{{else}}bg-red-500{{end}} text-white inline-block">
+                                {{if eq .NetworkData.LinkState 1}}Up{{else}}Down{{end}}
+                            </span>
+                        </div>
+                        <div>
+                            <div class="text-xs text-gray-500 uppercase mb-1">Link Speed</div>
+                            <div class="font-semibold">
+                                {{if ge .NetworkData.LinkSpeed 1000000000}}
+                                    {{printf "%.1f" (divf .NetworkData.LinkSpeed 1000000000)}} Gbps
+                                {{else}}
+                                    {{printf "%.1f" (divf .NetworkData.LinkSpeed 1000000)}} Mbps
+                                {{end}}
+                            </div>
+                        </div>
+                        <div>
+                            <div class="text-xs text-gray-500 uppercase mb-1">Duplex Mode</div>
+                            <div class="font-semibold">{{if eq .NetworkData.LinkDuplex 1}}Full-Duplex{{else}}Half-Duplex{{end}}</div>
+                        </div>
+                    </div>
+
+                    <!-- Download Statistics -->
+                    <div class="mb-6">
+                        <h4 class="font-semibold mb-3 text-blue-700">Download Statistics</h4>
+                        <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+                            <div class="bg-blue-50 p-3 rounded">
+                                <div class="text-xs text-gray-600 uppercase mb-1">Packets/sec (Now)</div>
+                                <div class="font-semibold text-lg">{{.NetworkData.DownloadPacketsNow}}</div>
+                                <div class="text-xs text-gray-500">Total: {{.NetworkData.DownloadPacketsTotal}}</div>
+                            </div>
+                            <div class="bg-blue-50 p-3 rounded">
+                                <div class="text-xs text-gray-600 uppercase mb-1">Bytes/sec (Now)</div>
+                                <div class="font-semibold text-lg">
+                                    {{if ge .NetworkData.DownloadBytesNow 1048576}}
+                                        {{printf "%.2f" (divf .NetworkData.DownloadBytesNow 1048576)}} MB/s
+                                    {{else if ge .NetworkData.DownloadBytesNow 1024}}
+                                        {{printf "%.2f" (divf .NetworkData.DownloadBytesNow 1024)}} KB/s
+                                    {{else}}
+                                        {{.NetworkData.DownloadBytesNow}} B/s
+                                    {{end}}
+                                </div>
+                                <div class="text-xs text-gray-500">Total: {{printf "%.2f" (divf .NetworkData.DownloadBytesTotal 1073741824)}} GB</div>
+                            </div>
+                            <div class="bg-blue-50 p-3 rounded">
+                                <div class="text-xs text-gray-600 uppercase mb-1">Errors (Now)</div>
+                                <div class="font-semibold text-lg {{if gt .NetworkData.DownloadErrorsNow 0}}text-red-600{{end}}">{{.NetworkData.DownloadErrorsNow}}</div>
+                                <div class="text-xs text-gray-500">Total: {{.NetworkData.DownloadErrorsTotal}}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Upload Statistics -->
+                    <div>
+                        <h4 class="font-semibold mb-3 text-green-700">Upload Statistics</h4>
+                        <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+                            <div class="bg-green-50 p-3 rounded">
+                                <div class="text-xs text-gray-600 uppercase mb-1">Packets/sec (Now)</div>
+                                <div class="font-semibold text-lg">{{.NetworkData.UploadPacketsNow}}</div>
+                                <div class="text-xs text-gray-500">Total: {{.NetworkData.UploadPacketsTotal}}</div>
+                            </div>
+                            <div class="bg-green-50 p-3 rounded">
+                                <div class="text-xs text-gray-600 uppercase mb-1">Bytes/sec (Now)</div>
+                                <div class="font-semibold text-lg">
+                                    {{if ge .NetworkData.UploadBytesNow 1048576}}
+                                        {{printf "%.2f" (divf .NetworkData.UploadBytesNow 1048576)}} MB/s
+                                    {{else if ge .NetworkData.UploadBytesNow 1024}}
+                                        {{printf "%.2f" (divf .NetworkData.UploadBytesNow 1024)}} KB/s
+                                    {{else}}
+                                        {{.NetworkData.UploadBytesNow}} B/s
+                                    {{end}}
+                                </div>
+                                <div class="text-xs text-gray-500">Total: {{printf "%.2f" (divf .NetworkData.UploadBytesTotal 1073741824)}} GB</div>
+                            </div>
+                            <div class="bg-green-50 p-3 rounded">
+                                <div class="text-xs text-gray-600 uppercase mb-1">Errors (Now)</div>
+                                <div class="font-semibold text-lg {{if gt .NetworkData.UploadErrorsNow 0}}text-red-600{{end}}">{{.NetworkData.UploadErrorsNow}}</div>
+                                <div class="text-xs text-gray-500">Total: {{.NetworkData.UploadErrorsTotal}}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {{end}}
+
                 <!-- Back Link -->
                 <div class="border-t pt-6 mt-6">
                     <a href="/host/{{.HostID}}" class="inline-block bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded transition-colors">

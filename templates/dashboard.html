@@ -97,7 +97,7 @@
                             {{range $service := $host.Services}}
                             <tr class="border-b hover:bg-gray-50">
                                 <td class="py-2 px-4 font-medium">
-                                    <a href="/service/{{$host.ID}}/{{$service.Name}}" class="text-blue-600 hover:text-blue-800 hover:underline">
+                                    <a href="/host/{{$host.ID}}/service/{{$service.Name}}" class="text-blue-600 hover:text-blue-800 hover:underline">
                                         {{$service.Name}}
                                     </a>
                                 </td>

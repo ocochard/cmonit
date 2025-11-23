@@ -39,7 +39,7 @@ import (
 
 // currentSchemaVersion is the current database schema version.
 // Increment this when making schema changes that require migration.
-const currentSchemaVersion = 4
+const currentSchemaVersion = 5
 
 // SQL schema for the cmonit database
 //
@@ -343,6 +343,66 @@ const (
 	createFilesystemMetricsIndex = `
 	CREATE INDEX IF NOT EXISTS idx_filesystem_metrics_lookup
 		ON filesystem_metrics(host_id, service_name, collected_at);`
+
+	// createNetworkMetricsTable creates the network_metrics table
+	//
+	// This table stores network interface metrics (link status, traffic, errors).
+	// Only populated for network interface services (type 8).
+	//
+	// Columns:
+	//   - id: Auto-incrementing integer
+	//   - host_id: Which host this metric is from
+	//   - service_name: Network interface service name (e.g., "Ethernet")
+	//   - link_state: Link status (1=up, 0=down)
+	//   - link_speed: Speed in bits per second (e.g., 1000000000 = 1 Gbps)
+	//   - link_duplex: Duplex mode (1=full-duplex, 0=half-duplex)
+	//   - download_packets_now: Current download packets per second
+	//   - download_packets_total: Total download packets since boot
+	//   - download_bytes_now: Current download bytes per second
+	//   - download_bytes_total: Total download bytes since boot
+	//   - download_errors_now: Current download errors
+	//   - download_errors_total: Total download errors since boot
+	//   - upload_packets_now: Current upload packets per second
+	//   - upload_packets_total: Total upload packets since boot
+	//   - upload_bytes_now: Current upload bytes per second
+	//   - upload_bytes_total: Total upload bytes since boot
+	//   - upload_errors_now: Current upload errors
+	//   - upload_errors_total: Total upload errors since boot
+	//   - collected_at: When this data was collected
+	//
+	// This is time-series data like the metrics table, allowing us to
+	// track network usage trends and detect performance issues.
+	createNetworkMetricsTable = `
+	CREATE TABLE IF NOT EXISTS network_metrics (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		host_id TEXT NOT NULL,
+		service_name TEXT NOT NULL,
+		link_state INTEGER,
+		link_speed INTEGER,
+		link_duplex INTEGER,
+		download_packets_now INTEGER,
+		download_packets_total INTEGER,
+		download_bytes_now INTEGER,
+		download_bytes_total INTEGER,
+		download_errors_now INTEGER,
+		download_errors_total INTEGER,
+		upload_packets_now INTEGER,
+		upload_packets_total INTEGER,
+		upload_bytes_now INTEGER,
+		upload_bytes_total INTEGER,
+		upload_errors_now INTEGER,
+		upload_errors_total INTEGER,
+		collected_at DATETIME NOT NULL,
+		FOREIGN KEY (host_id) REFERENCES hosts(id)
+	);`
+
+	// createNetworkMetricsIndex creates index for fast network metrics queries
+	//
+	// Optimizes queries like:
+	// "Show me network traffic for eth0 on host123 over the last hour"
+	createNetworkMetricsIndex = `
+	CREATE INDEX IF NOT EXISTS idx_network_metrics_lookup
+		ON network_metrics(host_id, service_name, collected_at);`
 )
 
 // InitDB initializes the database and creates all tables.
@@ -557,6 +617,20 @@ func InitDB(dbPath string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to create filesystem_metrics index: %w", err)
 	}
 
+	// Create network_metrics table
+	_, err = db.Exec(createNetworkMetricsTable)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to create network_metrics table: %w", err)
+	}
+
+	// Create network_metrics index
+	_, err = db.Exec(createNetworkMetricsIndex)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to create network_metrics index: %w", err)
+	}
+
 	log.Printf("[INFO] Database schema created successfully")
 
 	// Return the database connection
@@ -714,6 +788,28 @@ func migrateSchema(db *sql.DB, fromVersion, toVersion int) error {
 				return err
 			}
 			log.Printf("[INFO] Successfully migrated to schema version 4")
+
+		case 4:
+			// Migration from version 4 to version 5
+			// Add network_metrics table for network interface service support
+			log.Printf("[INFO] Migrating from v4 to v5: Adding network_metrics table")
+
+			_, err := db.Exec(createNetworkMetricsTable)
+			if err != nil {
+				return fmt.Errorf("migration v4->v5 failed creating table: %w", err)
+			}
+
+			_, err = db.Exec(createNetworkMetricsIndex)
+			if err != nil {
+				return fmt.Errorf("migration v4->v5 failed creating index: %w", err)
+			}
+
+			fromVersion = 5
+			err = setSchemaVersion(db, fromVersion)
+			if err != nil {
+				return err
+			}
+			log.Printf("[INFO] Successfully migrated to schema version 5")
 
 		default:
 			return fmt.Errorf("no migration path from version %d", fromVersion)

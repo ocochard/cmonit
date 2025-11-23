@@ -115,6 +115,7 @@ type ServiceDetailData struct {
 	Service         Service            // Service information
 	FilesystemData  *FilesystemMetrics // Filesystem metrics (if type 0)
 	ProcessData     *ProcessMetrics    // Process metrics (if type 3)
+	NetworkData     *NetworkMetrics    // Network metrics (if type 8)
 	LastUpdate      time.Time          // When this data was retrieved
 }
 
@@ -143,6 +144,25 @@ type ProcessMetrics struct {
 	CPUPercent    float64 // CPU usage percentage
 	MemoryPercent float64 // Memory usage percentage
 	MemoryKB      int64   // Memory usage in KB
+}
+
+// NetworkMetrics holds network interface service metrics.
+type NetworkMetrics struct {
+	LinkState            int     // Link state (0=down, 1=up)
+	LinkSpeed            int64   // Link speed in bits per second
+	LinkDuplex           int     // Duplex mode (0=half, 1=full)
+	DownloadPacketsNow   int64   // Current download packets per second
+	DownloadPacketsTotal int64   // Total download packets since boot
+	DownloadBytesNow     int64   // Current download bytes per second
+	DownloadBytesTotal   int64   // Total download bytes since boot
+	DownloadErrorsNow    int64   // Current download errors per second
+	DownloadErrorsTotal  int64   // Total download errors since boot
+	UploadPacketsNow     int64   // Current upload packets per second
+	UploadPacketsTotal   int64   // Total upload packets since boot
+	UploadBytesNow       int64   // Current upload bytes per second
+	UploadBytesTotal     int64   // Total upload bytes since boot
+	UploadErrorsNow      int64   // Current upload errors per second
+	UploadErrorsTotal    int64   // Total upload errors since boot
 }
 
 // =============================================================================

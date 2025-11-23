@@ -56,7 +56,7 @@ type HostWithServices struct {
 type Service struct {
 	Name          string    // Service name (e.g., "sshd", "nginx")
 	Type          int       // Service type (3=process, 5=system, 7=program)
-	TypeName      string    // Human-readable type ("Process", "System", etc.)
+	TypeName      string    // Human-readable type ("Process", "System", etc.")
 	Status        int       // 0=ok, 1=warning, 2=critical
 	StatusName    string    // Human-readable status ("OK", "Warning", "Critical")
 	StatusColor   string    // CSS color class ("green", "yellow", "red")
@@ -66,6 +66,46 @@ type Service struct {
 	MemoryPercent *float64  // Memory usage % (for process services)
 	MemoryKB      *int64    // Memory usage in KB (for process services)
 	CollectedAt   time.Time // When metrics were last collected
+}
+
+// StatusData holds data for the main status overview page.
+type StatusData struct {
+	Hosts      []HostStatus // List of all hosts with aggregated status
+	LastUpdate time.Time    // When this data was retrieved
+}
+
+// HostStatus represents a host's overall status for the status page.
+type HostStatus struct {
+	ID                string    // Unique host ID
+	Hostname          string    // Display name
+	IsStale           bool      // True if not seen in 5+ minutes
+	LastSeen          time.Time // Last update time
+	StatusColor       string    // Overall status: "green", "orange", "red", "gray"
+	StatusName        string    // Status name: "OK", "Warning", "Critical", "Unknown"
+	StatusDescription string    // Human-readable status description
+	CPUPercent        *float64  // System CPU usage %
+	MemoryPercent     *float64  // System memory usage %
+	EventCount        int       // Number of events for this host
+	TotalServices     int       // Total number of services
+	FailedServices    int       // Number of failed/warning services
+}
+
+// EventsData holds data for the events page.
+type EventsData struct {
+	HostID     string    // Host ID
+	Hostname   string    // Host display name
+	Events     []Event   // List of events
+	LastUpdate time.Time // When this data was retrieved
+}
+
+// Event represents a single event from the events table.
+type Event struct {
+	ID            int       // Event ID
+	ServiceName   string    // Service that generated the event
+	EventType     int       // Event type code
+	EventTypeName string    // Human-readable event type
+	Message       string    // Event message
+	CreatedAt     time.Time // When the event occurred
 }
 
 // =============================================================================

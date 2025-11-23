@@ -280,7 +280,20 @@ func main() {
 	// - Different ports for different purposes (security, firewall rules)
 	// - Easier to add features to one without affecting the other
 	webMux := http.NewServeMux()
-	webMux.HandleFunc("/", web.HandleDashboard)
+
+	// Main status overview page (shows all hosts in a table)
+	webMux.HandleFunc("/", web.HandleStatus)
+
+	// Host detail pages (with graphs)
+	// Must be registered before "/" to match more specific paths
+	webMux.HandleFunc("/host/", func(w http.ResponseWriter, r *http.Request) {
+		// Check if this is an events page request
+		if strings.HasSuffix(r.URL.Path, "/events") {
+			web.HandleHostEvents(w, r)
+		} else {
+			web.HandleHostDetail(w, r)
+		}
+	})
 
 	// API endpoints for JavaScript to fetch data
 	//
@@ -291,9 +304,6 @@ func main() {
 	// /api/action performs actions on services (start, stop, restart, etc.)
 	// Used by action buttons on the dashboard
 	webMux.HandleFunc("/api/action", web.HandleActionAPI)
-
-	// TODO: Add more web routes in Phase 3+
-	// webMux.HandleFunc("/host/", handleHostDetails)
 
 	// Start the collector HTTP server in a goroutine (lightweight thread)
 	//

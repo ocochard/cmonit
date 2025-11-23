@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>cmonit - Status Overview</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .status-icon {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .status-green { background-color: #10b981; }
+        .status-orange { background-color: #f97316; }
+        .status-red { background-color: #ef4444; }
+        .status-gray { background-color: #6b7280; }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <div class="container mx-auto px-4 py-8 max-w-7xl">
+        <!-- Header -->
+        <div class="mb-8">
+            <h1 class="text-3xl font-bold text-gray-900 mb-2">cmonit - Status Overview</h1>
+            <p class="text-gray-600">Last updated: {{.LastUpdate.Format "Jan 02, 2006 15:04:05 MST"}}</p>
+        </div>
+
+        <!-- Hosts Table -->
+        {{if .Hosts}}
+        <div class="bg-white rounded-lg shadow overflow-hidden">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Status
+                        </th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Host
+                        </th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            % CPU
+                        </th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            % Memory
+                        </th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Status Description
+                        </th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Events
+                        </th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                    {{range .Hosts}}
+                    <tr class="hover:bg-gray-50">
+                        <!-- Status Icon -->
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <span class="status-icon status-{{.StatusColor}}" title="{{.StatusName}}"></span>
+                        </td>
+
+                        <!-- Host (Clickable Link) -->
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <a href="/host/{{.ID}}" class="text-blue-600 hover:text-blue-800 hover:underline font-medium">
+                                {{.Hostname}}
+                            </a>
+                            {{if .IsStale}}
+                            <span class="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
+                                Stale
+                            </span>
+                            {{end}}
+                        </td>
+
+                        <!-- CPU % -->
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {{if .CPUPercent}}
+                                {{printf "%.1f%%" .CPUPercent}}
+                            {{else}}
+                                N/A
+                            {{end}}
+                        </td>
+
+                        <!-- Memory % -->
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {{if .MemoryPercent}}
+                                {{printf "%.1f%%" .MemoryPercent}}
+                            {{else}}
+                                N/A
+                            {{end}}
+                        </td>
+
+                        <!-- Status Description -->
+                        <td class="px-6 py-4 text-sm text-gray-900">
+                            {{.StatusDescription}}
+                        </td>
+
+                        <!-- Events (Clickable Link) -->
+                        <td class="px-6 py-4 whitespace-nowrap text-sm">
+                            {{if gt .EventCount 0}}
+                                <a href="/host/{{.ID}}/events" class="text-blue-600 hover:text-blue-800 hover:underline">
+                                    {{.EventCount}} event{{if ne .EventCount 1}}s{{end}}
+                                </a>
+                            {{else}}
+                                <span class="text-gray-500">No events</span>
+                            {{end}}
+                        </td>
+                    </tr>
+                    {{end}}
+                </tbody>
+            </table>
+        </div>
+        {{else}}
+        <!-- No Hosts Message -->
+        <div class="bg-white rounded-lg shadow p-8 text-center">
+            <p class="text-gray-500 text-lg">No monitored hosts found</p>
+            <p class="text-gray-400 mt-2">Configure Monit agents to report to this collector</p>
+        </div>
+        {{end}}
+
+        <!-- Auto-refresh Script -->
+        <script>
+            // Auto-refresh page every 60 seconds
+            setInterval(function() {
+                window.location.reload();
+            }, 60000);
+        </script>
+    </div>
+</body>
+</html>

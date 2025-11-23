@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Events - {{.Hostname}} - cmonit</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50">
+    <div class="container mx-auto px-4 py-8 max-w-7xl">
+        <!-- Header -->
+        <div class="mb-8">
+            <nav class="text-sm text-gray-500 mb-2">
+                <a href="/" class="hover:text-gray-700">Home</a>
+                <span class="mx-2">/</span>
+                <a href="/host/{{.HostID}}" class="hover:text-gray-700">{{.Hostname}}</a>
+                <span class="mx-2">/</span>
+                <span class="text-gray-900">Events</span>
+            </nav>
+            <h1 class="text-3xl font-bold text-gray-900 mb-2">Events - {{.Hostname}}</h1>
+            <p class="text-gray-600">Last updated: {{.LastUpdate.Format "Jan 02, 2006 15:04:05 MST"}}</p>
+        </div>
+
+        <!-- Events Table -->
+        {{if .Events}}
+        <div class="bg-white rounded-lg shadow overflow-hidden">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Timestamp
+                        </th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Service
+                        </th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Event Type
+                        </th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Message
+                        </th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                    {{range .Events}}
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {{.CreatedAt.Format "Jan 02, 15:04:05"}}
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                            {{.ServiceName}}
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {{.EventTypeName}}
+                        </td>
+                        <td class="px-6 py-4 text-sm text-gray-700">
+                            {{.Message}}
+                        </td>
+                    </tr>
+                    {{end}}
+                </tbody>
+            </table>
+        </div>
+        {{else}}
+        <!-- No Events Message -->
+        <div class="bg-white rounded-lg shadow p-8 text-center">
+            <p class="text-gray-500 text-lg">No events found for this host</p>
+            <p class="text-gray-400 mt-2">Events will appear here when service states change</p>
+        </div>
+        {{end}}
+
+        <!-- Auto-refresh Script -->
+        <script>
+            // Auto-refresh page every 60 seconds
+            setInterval(function() {
+                window.location.reload();
+            }, 60000);
+        </script>
+    </div>
+</body>
+</html>

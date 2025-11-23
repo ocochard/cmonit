@@ -39,7 +39,7 @@ import (
 
 // currentSchemaVersion is the current database schema version.
 // Increment this when making schema changes that require migration.
-const currentSchemaVersion = 2
+const currentSchemaVersion = 3
 
 // SQL schema for the cmonit database
 //
@@ -99,6 +99,7 @@ const (
 	//   - total_swap: Total swap space in bytes
 	//   - system_uptime: System uptime in seconds
 	//   - boottime: Unix timestamp of last boot
+	//   - monit_uptime: Monit daemon uptime in seconds (for restart detection)
 	//   - last_seen: When we last received data from this host
 	//   - created_at: When we first saw this host
 	//
@@ -129,6 +130,7 @@ const (
 		total_swap INTEGER,
 		system_uptime INTEGER,
 		boottime INTEGER,
+		monit_uptime INTEGER,
 		last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		UNIQUE(hostname)
@@ -599,6 +601,23 @@ func migrateSchema(db *sql.DB, fromVersion, toVersion int) error {
 				return err
 			}
 			log.Printf("[INFO] Successfully migrated to schema version 2")
+
+		case 2:
+			// Migration from version 2 to version 3
+			// Add Monit daemon uptime tracking for restart detection
+			log.Printf("[INFO] Migrating from v2 to v3: Adding monit_uptime column")
+
+			_, err := db.Exec("ALTER TABLE hosts ADD COLUMN monit_uptime INTEGER")
+			if err != nil {
+				return fmt.Errorf("migration v2->v3 failed: %w", err)
+			}
+
+			fromVersion = 3
+			err = setSchemaVersion(db, fromVersion)
+			if err != nil {
+				return err
+			}
+			log.Printf("[INFO] Successfully migrated to schema version 3")
 
 		default:
 			return fmt.Errorf("no migration path from version %d", fromVersion)

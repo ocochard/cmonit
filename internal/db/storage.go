@@ -22,6 +22,9 @@ import (
 // If the host already exists (matched by ID), it updates the record.
 // If it's a new host, it creates a new record.
 //
+// Additionally, this function detects Monit restarts by tracking monit_uptime.
+// When uptime decreases (new < old), it creates an event in the events table.
+//
 // Parameters:
 //   - db: Database connection (from InitDB)
 //   - server: Server information from parsed XML
@@ -32,9 +35,12 @@ import (
 //   - error: nil if successful, error describing problem if failed
 //
 // How it works:
-// 1. Use INSERT OR REPLACE to upsert the host
-// 2. Update last_seen to current time
-// 3. Preserve created_at for existing hosts
+// 1. Query previous monit_uptime (if host exists)
+// 2. Use INSERT OR REPLACE to upsert the host
+// 3. Update last_seen to current time
+// 4. Preserve created_at for existing hosts
+// 5. Compare old vs new monit_uptime to detect restarts
+// 6. Create event if restart is detected
 //
 // Thread-safety: Safe to call from multiple goroutines (database/sql handles locking)
 func StoreHost(db *sql.DB, server *parser.Server, platform *parser.Platform, systemService *parser.Service) error {
@@ -55,6 +61,14 @@ func StoreHost(db *sql.DB, server *parser.Server, platform *parser.Platform, sys
 		// Example: "webserver-01-1763842004"
 		hostID = fmt.Sprintf("%s-%d", server.LocalHostname, server.Incarnation)
 		log.Printf("[INFO] Generated host ID: %s (no idfile configured in Monit)", hostID)
+	}
+
+	// Query the previous monit_uptime to detect restarts
+	// If the new uptime is less than the old uptime, Monit restarted
+	var oldMonitUptime sql.NullInt64
+	err := db.QueryRow("SELECT monit_uptime FROM hosts WHERE id = ?", hostID).Scan(&oldMonitUptime)
+	if err != nil && err != sql.ErrNoRows {
+		log.Printf("[WARN] Failed to query previous monit_uptime for %s: %v", hostID, err)
 	}
 
 	// SQL query to insert or update the host record
@@ -91,9 +105,11 @@ func StoreHost(db *sql.DB, server *parser.Server, platform *parser.Platform, sys
 			total_swap,
 			system_uptime,
 			boottime,
+			monit_uptime,
 			last_seen,
 			created_at
 		) VALUES (
+			?,
 			?,
 			?,
 			?,
@@ -156,7 +172,7 @@ func StoreHost(db *sql.DB, server *parser.Server, platform *parser.Platform, sys
 	//   - error: nil if successful, error if failed
 	//
 	// We use _ to ignore the Result (we don't need it)
-	_, err := db.Exec(
+	_, err = db.Exec(
 		query,
 		hostID,
 		server.LocalHostname,
@@ -176,6 +192,7 @@ func StoreHost(db *sql.DB, server *parser.Server, platform *parser.Platform, sys
 		platform.Swap,
 		systemUptime,
 		boottime,
+		server.Uptime,
 		now,
 		hostID,
 		now,
@@ -194,11 +211,74 @@ func StoreHost(db *sql.DB, server *parser.Server, platform *parser.Platform, sys
 		return fmt.Errorf("failed to store host: %w", err)
 	}
 
+	// Check if Monit restarted by comparing uptime values
+	// If the new uptime is less than the old uptime, Monit was restarted
+	if oldMonitUptime.Valid && oldMonitUptime.Int64 > 0 {
+		// Old uptime exists and was non-zero (Monit was running)
+		// Check if new uptime is less than old (restart detected)
+		if server.Uptime < oldMonitUptime.Int64 {
+			// Monit restarted! Create an event
+			log.Printf("[INFO] Detected Monit restart on %s (old uptime: %d, new uptime: %d)",
+				server.LocalHostname, oldMonitUptime.Int64, server.Uptime)
+
+			// Create restart event
+			// Event type 0x40000 = Heartbeat (closest match for daemon restart)
+			eventErr := StoreEvent(db, hostID, server.LocalHostname,
+				0x40000, // Heartbeat event type
+				fmt.Sprintf("Monit daemon restarted (uptime reset from %d to %d seconds)",
+					oldMonitUptime.Int64, server.Uptime))
+			if eventErr != nil {
+				log.Printf("[WARN] Failed to create restart event for %s: %v", server.LocalHostname, eventErr)
+			}
+		}
+	}
+
 	// Success!
 	// Log for debugging (helps track what's happening)
-	log.Printf("[DEBUG] Stored host: %s (ID: %s)", server.LocalHostname, hostID)
+	log.Printf("[DEBUG] Stored host: %s (ID: %s, Monit uptime: %d)", server.LocalHostname, hostID, server.Uptime)
 
 	// Return nil (no error)
+	return nil
+}
+
+// StoreEvent creates an event record in the events table.
+//
+// Events track significant state changes: service failures, recoveries,
+// Monit daemon restarts, etc. These are used for alerting and audit trails.
+//
+// Parameters:
+//   - db: Database connection
+//   - hostID: The host this event is for
+//   - serviceName: The service name (or hostname for daemon events)
+//   - eventType: Monit event type code (e.g., 0x40000 for Heartbeat)
+//   - message: Human-readable description of the event
+//
+// Returns:
+//   - error: nil if successful, error if failed
+//
+// Example usage:
+//   StoreEvent(db, "host123", "nginx", 0x20, "Connection failed")
+//   StoreEvent(db, "host123", "webserver", 0x40000, "Monit daemon restarted")
+func StoreEvent(db *sql.DB, hostID, serviceName string, eventType int, message string) error {
+	const query = `
+		INSERT INTO events (
+			host_id,
+			service_name,
+			event_type,
+			message,
+			created_at
+		) VALUES (?, ?, ?, ?, ?)
+	`
+
+	now := time.Now()
+
+	_, err := db.Exec(query, hostID, serviceName, eventType, message, now)
+	if err != nil {
+		log.Printf("[ERROR] Failed to store event for %s/%s: %v", hostID, serviceName, err)
+		return fmt.Errorf("failed to store event: %w", err)
+	}
+
+	log.Printf("[INFO] Created event: %s/%s - %s", hostID, serviceName, message)
 	return nil
 }
 

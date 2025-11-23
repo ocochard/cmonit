@@ -707,6 +707,11 @@ func StoreMonitStatus(db *sql.DB, status *parser.MonitStatus) error {
 	// For each service:
 	// - Store service status in services table
 	// - Extract and store metrics in metrics table
+
+	// Capture current timestamp before storing services
+	// We'll use this to identify stale services after the update
+	updateTime := time.Now()
+
 	for i := range status.Services {
 		service := &status.Services[i]
 
@@ -749,6 +754,28 @@ func StoreMonitStatus(db *sql.DB, status *parser.MonitStatus) error {
 		// case 2: // File
 		// case 7: // Program
 		// etc.
+		}
+	}
+
+	// Step 4: Clean up stale services
+	//
+	// Any service for this host that wasn't in the current status report
+	// will have an old last_seen timestamp. Delete these stale services.
+	// This handles cases where:
+	// - A service was removed from Monit configuration
+	// - A service was renamed
+	// - A monitored process/filesystem was removed
+	result, err := db.Exec(`
+		DELETE FROM services
+		WHERE host_id = ? AND last_seen < ?
+	`, hostID, updateTime)
+
+	if err != nil {
+		log.Printf("[WARN] Failed to clean up stale services for %s: %v", hostID, err)
+	} else {
+		rowsAffected, _ := result.RowsAffected()
+		if rowsAffected > 0 {
+			log.Printf("[INFO] Removed %d stale service(s) for host %s", rowsAffected, status.Server.LocalHostname)
 		}
 	}
 

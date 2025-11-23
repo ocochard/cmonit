@@ -9,6 +9,7 @@ This directory contains technical documentation for cmonit developers and contri
 - **[Monit XML Reference](monit-xml-reference.md)** - Complete XML field reference
 - **[Testing Plan](testing-plan.md)** - Acceptance tests for all phases
 - **[Coding Standards](coding-standards.md)** - Code documentation guidelines
+- **[API Documentation](api.md)** - M/Monit-compatible HTTP API reference
 
 ## For End Users
 

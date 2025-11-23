@@ -52,6 +52,12 @@ import (
 // Later we'll refactor to use dependency injection for better testability.
 var globalDB *sql.DB
 
+// debugEnabled controls whether DEBUG log messages are output.
+//
+// When true, enables verbose DEBUG logging for troubleshooting.
+// Controlled by the -debug command-line flag.
+var debugEnabled bool
+
 // main is the entry point of the program
 // Go programs always start execution here
 //
@@ -106,6 +112,9 @@ func main() {
 	syslogFacility := flag.String("syslog", "",
 		"Syslog facility (daemon, local0-local7, or empty for stderr logging)")
 
+	debugFlag := flag.Bool("debug", false,
+		"Enable verbose DEBUG logging for troubleshooting")
+
 	// Parse command-line flags
 	//
 	// flag.Parse() processes os.Args (command-line arguments)
@@ -117,6 +126,10 @@ func main() {
 	//   ./cmonit -web [::]:3000              # IPv6 all interfaces
 	//   ./cmonit -collector :9000 -web :4000 # Custom ports
 	flag.Parse()
+
+	// Set global debug mode from flag
+	debugEnabled = *debugFlag
+	db.SetDebugMode(debugEnabled)
 
 	// Setup syslog if requested
 	//
@@ -504,7 +517,9 @@ func handleCollector(w http.ResponseWriter, r *http.Request) {
 	//
 	// r.Method is the HTTP method (GET, POST, PUT, DELETE, etc.)
 	// r.RemoteAddr is the client's IP address and port
-	log.Printf("[DEBUG] %s /collector from %s", r.Method, r.RemoteAddr)
+	if debugEnabled {
+		log.Printf("[DEBUG] %s /collector from %s", r.Method, r.RemoteAddr)
+	}
 
 	// Check if request method is POST
 	// The collector endpoint should only accept POST requests from Monit agents
@@ -640,7 +655,9 @@ func handleCollector(w http.ResponseWriter, r *http.Request) {
 		// Use the gzip reader instead of the raw body
 		bodyReader = gzipReader
 
-		log.Printf("[DEBUG] Request is gzip-compressed, decompressing...")
+		if debugEnabled {
+			log.Printf("[DEBUG] Request is gzip-compressed, decompressing...")
+		}
 	}
 
 	// Read the request body (XML data from Monit)
@@ -681,7 +698,9 @@ func handleCollector(w http.ResponseWriter, r *http.Request) {
 
 	// Log the size for debugging
 	// Helps identify unusually large or small requests
-	log.Printf("[DEBUG] Received %d bytes from %s", len(body), r.RemoteAddr)
+	if debugEnabled {
+		log.Printf("[DEBUG] Received %d bytes from %s", len(body), r.RemoteAddr)
+	}
 
 	// Parse the XML into our data structures
 	//

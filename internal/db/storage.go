@@ -16,6 +16,15 @@ import (
 	"github.com/ocochard/cmonit/internal/parser" // Our XML parser
 )
 
+// debugMode controls whether DEBUG log messages are output.
+// Set via SetDebugMode() from the main package.
+var debugMode bool
+
+// SetDebugMode enables or disables debug logging in the db package.
+func SetDebugMode(enabled bool) {
+	debugMode = enabled
+}
+
 // StoreHost saves or updates a host record in the database.
 //
 // This function is called every time we receive status data from a Monit agent.
@@ -235,7 +244,9 @@ func StoreHost(db *sql.DB, server *parser.Server, platform *parser.Platform, sys
 
 	// Success!
 	// Log for debugging (helps track what's happening)
-	log.Printf("[DEBUG] Stored host: %s (ID: %s, Monit uptime: %d)", server.LocalHostname, hostID, server.Uptime)
+	if debugMode {
+		log.Printf("[DEBUG] Stored host: %s (ID: %s, Monit uptime: %d)", server.LocalHostname, hostID, server.Uptime)
+	}
 
 	// Return nil (no error)
 	return nil
@@ -369,8 +380,10 @@ func StoreService(db *sql.DB, hostID string, service *parser.Service) error {
 		return fmt.Errorf("failed to store service: %w", err)
 	}
 
-	log.Printf("[DEBUG] Stored service: %s/%s (type %d, status %d)",
-		hostID, service.Name, service.Type, service.Status)
+	if debugMode {
+		log.Printf("[DEBUG] Stored service: %s/%s (type %d, status %d)",
+			hostID, service.Name, service.Type, service.Status)
+	}
 
 	return nil
 }
@@ -554,7 +567,9 @@ func StoreSystemMetrics(db *sql.DB, hostID string, service *parser.Service) erro
 	}
 
 	// All metrics stored successfully!
-	log.Printf("[DEBUG] Stored %d system metrics for %s/%s", 12, hostID, service.Name)
+	if debugMode {
+		log.Printf("[DEBUG] Stored %d system metrics for %s/%s", 12, hostID, service.Name)
+	}
 	return nil
 }
 
@@ -634,7 +649,9 @@ func StoreProcessMetrics(db *sql.DB, hostID string, service *parser.Service) err
 		}
 	}
 
-	log.Printf("[DEBUG] Stored process metrics for %s/%s", hostID, service.Name)
+	if debugMode {
+		log.Printf("[DEBUG] Stored process metrics for %s/%s", hostID, service.Name)
+	}
 	return nil
 }
 

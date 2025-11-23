@@ -1,20 +1,37 @@
 # cmonit - Central Monit Monitor
 
-An open-source M/Monit clone that collects and visualizes monitoring data from Monit agents.
+Open Source central monitoring dashboard for Monit: collect status, graph metrics, and control services across multiple hosts.
 
 ![cmonit Status](docs/status.png)
 ![cmonit Host](docs/host.png)
 
 ## Features
 
-- HTTP collector compatible with Monit agents
-- SQLite database for metrics storage
-- Web dashboard with real-time status
-- Time-series graphs (CPU, memory, load)
-- Multiple time ranges (1h, 6h, 24h, 7d, 30d)
-- Configurable listen addresses (IPv4/IPv6 support)
-- HTTP Basic Authentication for Web UI
-- TLS/HTTPS support for encrypted connections
+### Monitoring & Visualization
+- **Multi-page dashboard**: Status overview, host details, and events pages
+- **Real-time status**: Color-coded status indicators (green/orange/red/gray)
+- **System metrics**: CPU, Memory, Load average with time-series graphs
+- **Multiple time ranges**: 1h, 6h, 24h for historical data visualization
+- **Platform information**: OS, CPU count, memory, uptime display
+- **Process monitoring**: PID, CPU%, memory usage for process services
+
+### Events & Alerts
+- **Event tracking**: Automatic logging of service state changes
+- **Monit restart detection**: Tracks Monit daemon uptime and detects restarts
+- **Event history**: View all events per host with timestamps and details
+- **Stale host detection**: Alerts when hosts stop reporting (>5 minutes)
+
+### Service Control
+- **Remote actions**: Start, stop, restart services from the dashboard
+- **Monitor control**: Enable/disable monitoring for individual services
+- **Real-time feedback**: Action confirmation and status updates
+
+### Security & Deployment
+- **HTTP Basic Authentication**: Protect web UI with username/password
+- **TLS/HTTPS support**: Encrypted connections with certificate support
+- **Configurable addresses**: IPv4/IPv6, custom ports, specific interface binding
+- **SQLite database**: Reliable storage with WAL mode for concurrency
+- **Syslog integration**: Daemon logging for production environments
 
 ## Quick Start
 
@@ -106,6 +123,32 @@ go build -o cmonit ./cmd/cmonit
 Open your browser to the configured web address:
 - Default: **http://localhost:3000/**
 - All interfaces: **http://your-server-ip:3000/**
+
+### Dashboard Pages
+
+cmonit provides a multi-page interface:
+
+1. **Status Overview** (`/`)
+   - Table view of all monitored hosts
+   - Real-time status indicators (green=OK, orange=warning, red=critical, gray=unknown)
+   - CPU and Memory percentages for each host
+   - Stale host detection (hosts not seen in 5+ minutes)
+   - Event counts per host
+   - Click hostname to view details
+
+2. **Host Detail** (`/host/{host_id}`)
+   - Detailed platform information (OS, CPU, memory, uptime)
+   - Service table with status, monitoring state, and resource usage
+   - Action buttons: start, stop, restart, monitor, unmonitor
+   - Real-time system metrics graphs (Load, CPU, Memory)
+   - Time range selector (1h, 6h, 24h)
+   - "View Events" button to see host event history
+
+3. **Events Page** (`/host/{host_id}/events`)
+   - Chronological list of events (newest first)
+   - Event types: Monit restarts, service state changes
+   - Timestamps and detailed messages
+   - Auto-refresh every 60 seconds
 
 ## Configure Monit Agents
 

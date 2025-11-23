@@ -12,15 +12,35 @@
 
 ## Project Overview
 
-**cmonit** (Central Monit) is an open-source clone of the proprietary M/Monit software. It provides centralized monitoring and management of all Monit-enabled hosts through a modern, clean, mobile-friendly web interface.
+**cmonit** (Central Monit) is an open-source centralized monitoring dashboard for Monit. It provides monitoring and management of all Monit-enabled hosts through a modern, clean, mobile-friendly web interface.
 
 ### Key Features
 
-✅ **HTTP Collector** - Receives status updates from Monit agents
-✅ **SQLite Database** - Stores current status and historical metrics
-✅ **Web Dashboard** - Real-time status view of all monitored hosts/services
-✅ **Time-Series Graphs** - Visualize CPU, memory, disk, network metrics over time
-✅ **M/Monit API Compatible** - REST API compatible with M/Monit tools
+#### Monitoring & Visualization
+✅ **Multi-page Dashboard** - Status overview, host details, and events pages
+✅ **Real-time Status** - Color-coded status indicators (green/orange/red/gray)
+✅ **System Metrics** - CPU, Memory, Load average with time-series graphs
+✅ **Multiple Time Ranges** - 1h, 6h, 24h for historical data visualization
+✅ **Platform Information** - OS, CPU count, memory, uptime display
+✅ **Process Monitoring** - PID, CPU%, memory usage for process services
+
+#### Events & Alerts
+✅ **Event Tracking** - Automatic logging of service state changes
+✅ **Monit Restart Detection** - Tracks Monit daemon uptime and detects restarts
+✅ **Event History** - View all events per host with timestamps and details
+✅ **Stale Host Detection** - Alerts when hosts stop reporting (>5 minutes)
+
+#### Service Control
+✅ **Remote Actions** - Start, stop, restart services from the dashboard
+✅ **Monitor Control** - Enable/disable monitoring for individual services
+✅ **Real-time Feedback** - Action confirmation and status updates
+
+#### Security & Deployment
+✅ **HTTP Basic Authentication** - Protect web UI with username/password
+✅ **TLS/HTTPS Support** - Encrypted connections with certificate support
+✅ **Configurable Addresses** - IPv4/IPv6, custom ports, specific interface binding
+✅ **SQLite Database** - Reliable storage with WAL mode for concurrency
+✅ **Syslog Integration** - Daemon logging for production environments
 ✅ **Single Binary** - No dependencies, easy deployment
 ✅ **Mobile Friendly** - Responsive design works on phones/tablets
 
@@ -289,31 +309,29 @@ Ready to start coding? Here's what to do:
 
 ## Current System Status
 
-Your FreeBSD system has:
-- ✅ Monit running (`/usr/local/bin/monit`)
-- ✅ Configuration: `/usr/local/etc/monitrc`
-- ✅ Collector URL configured: `http://monit:monit@127.0.0.1:8080/collector`
-  - ⚠️ **Note:** There's a typo in the config: `127.0.0:1` should be `127.0.0.1`
-  - Fix this before testing!
-- ✅ Monitored services:
-  - System (CPU, memory, swap, load)
-  - sshd process
-  - nginx process
-  - SSL certificate file
-  - Temperature check script
+cmonit is fully operational with:
+- ✅ HTTP Collector on port 8080 receiving Monit status data
+- ✅ Web Dashboard on port 3000 (configurable)
+- ✅ SQLite database with WAL mode for data persistence
+- ✅ Multi-page interface: Status Overview, Host Details, Events
+- ✅ Time-series graphs for system metrics
+- ✅ Service control API (start/stop/restart/monitor/unmonitor)
+- ✅ Event tracking and Monit restart detection
+- ✅ HTTP Basic Authentication support
+- ✅ TLS/HTTPS support
+- ✅ Syslog integration
+- ✅ FreeBSD rc.d startup script
 
-### Fix the Monit Configuration Typo
+### Configure Monit Agents
 
-Before starting development:
+To connect your Monit agents to cmonit:
 
 ```bash
+# Edit your monitrc file
 sudo vi /usr/local/etc/monitrc
 
-# Change this line:
-# set mmonit http://monit:monit@127.0.0:1:8080/collector
-
-# To:
-set mmonit http://monit:monit@127.0.0.1:8080/collector
+# Add collector configuration:
+set mmonit http://monit:monit@cmonit-server:8080/collector
 
 # Reload monit:
 sudo monit reload
@@ -380,17 +398,20 @@ git commit -m "Phase 3: Time-series graphs complete"
 
 ---
 
-## Success Criteria
+## Implementation Status
 
-The project is successful when:
+All core features have been successfully implemented:
 
-1. ✅ cmonit receives data from your Monit agent
-2. ✅ SQLite database stores current status + historical metrics
-3. ✅ Web dashboard displays all monitored hosts/services
-4. ✅ Time-series graphs show CPU, memory, disk, load metrics
-5. ✅ All acceptance tests pass
-6. ✅ System runs stably for 24+ hours
-7. ✅ Single binary deployment works
+1. ✅ **Collector Daemon** - Receives data from Monit agents
+2. ✅ **SQLite Database** - Stores current status + historical metrics with WAL mode
+3. ✅ **Multi-page Dashboard** - Status overview, host details, events pages
+4. ✅ **Time-series Graphs** - CPU, memory, load average visualization
+5. ✅ **Service Control** - Start, stop, restart, monitor, unmonitor actions
+6. ✅ **Event Tracking** - Service state changes and Monit restart detection
+7. ✅ **Security Features** - HTTP Basic Authentication and TLS/HTTPS support
+8. ✅ **Syslog Integration** - Production-ready logging
+9. ✅ **FreeBSD Support** - rc.d startup script included
+10. ✅ **Single Binary** - Self-contained deployment
 
 ---
 
@@ -416,17 +437,39 @@ All documentation is:
 
 ---
 
-## Next Steps
+## Getting Started
 
-Ready to start? Here's your immediate action plan:
+Ready to deploy cmonit? Here's the quick start guide:
 
-1. ✅ **Read all documentation** (you're doing this now!)
-2. ⬜ **Fix Monit configuration typo** (127.0.0:1 → 127.0.0.1)
-3. ⬜ **Initialize Go project** (`go mod init`)
-4. ⬜ **Create directory structure**
-5. ⬜ **Start Phase 1, Test T1.1** (Basic HTTP server)
-6. ⬜ **Follow Plan → Act → Validate loop**
-7. ⬜ **Do NOT proceed until each test passes**
+1. **Build the binary**
+   ```bash
+   go build -o cmonit ./cmd/cmonit
+   ```
+
+2. **Run cmonit**
+   ```bash
+   # Default configuration
+   ./cmonit
+
+   # Production configuration with authentication and TLS
+   ./cmonit -web 0.0.0.0:3000 \
+     -web-user admin -web-password your-password \
+     -web-cert /path/to/cert.pem -web-key /path/to/key.pem \
+     -syslog daemon
+   ```
+
+3. **Configure Monit agents**
+   ```bash
+   # Add to /usr/local/etc/monitrc
+   set mmonit http://monit:monit@cmonit-server:8080/collector
+
+   # Reload Monit
+   sudo monit reload
+   ```
+
+4. **Access the dashboard**
+   - Open your browser to http://localhost:3000/ (or your configured address)
+   - View status overview, host details, and events
 
 ---
 
@@ -446,8 +489,15 @@ BSD 2-Clause License (see LICENSE file)
 
 ---
 
-**Let's build this! 🚀**
+## Project Status
 
-The plan is solid, the technology stack is perfect, and the testing strategy is comprehensive. Follow the phases one test at a time, and you'll have a working cmonit system in about a week.
+**cmonit is complete and production-ready!**
 
-Good luck! 🎯
+All core features have been implemented and tested. The system provides a comprehensive monitoring solution for Monit with:
+- Real-time status monitoring across multiple hosts
+- Time-series graphs for system metrics
+- Service control capabilities
+- Event tracking and alerting
+- Production-ready security features
+
+For detailed usage instructions, see the main [README.md](../README.md) in the project root.

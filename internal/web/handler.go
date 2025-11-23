@@ -108,6 +108,43 @@ type Event struct {
 	CreatedAt     time.Time // When the event occurred
 }
 
+// ServiceDetailData holds data for the service detail page.
+type ServiceDetailData struct {
+	HostID          string             // Host ID
+	Hostname        string             // Host display name
+	Service         Service            // Service information
+	FilesystemData  *FilesystemMetrics // Filesystem metrics (if type 0)
+	ProcessData     *ProcessMetrics    // Process metrics (if type 3)
+	LastUpdate      time.Time          // When this data was retrieved
+}
+
+// FilesystemMetrics holds filesystem service metrics.
+type FilesystemMetrics struct {
+	FSType          string  // Filesystem type (e.g., "zfs", "ext4")
+	FSFlags         string  // Mount flags
+	Mode            string  // Permissions mode
+	UID             int     // Owner UID
+	GID             int     // Owner GID
+	BlockPercent    float64 // Disk usage percentage
+	BlockUsageMB    float64 // Used space in MB
+	BlockTotalMB    float64 // Total space in MB
+	InodePercent    float64 // Inode usage percentage
+	InodeUsage      int64   // Used inodes
+	InodeTotal      int64   // Total inodes
+	ReadBytesTotal  int64   // Total bytes read
+	ReadOpsTotal    int64   // Total read operations
+	WriteBytesTotal int64   // Total bytes written
+	WriteOpsTotal   int64   // Total write operations
+}
+
+// ProcessMetrics holds process service metrics.
+type ProcessMetrics struct {
+	PID           int     // Process ID
+	CPUPercent    float64 // CPU usage percentage
+	MemoryPercent float64 // Memory usage percentage
+	MemoryKB      int64   // Memory usage in KB
+}
+
 // =============================================================================
 // GLOBAL VARIABLES
 // =============================================================================
@@ -175,6 +212,27 @@ func InitTemplates() error {
 				return 0
 			}
 			return af / bf
+		},
+		"sub": func(a, b interface{}) float64 {
+			// Convert interfaces to float64
+			var af, bf float64
+			switch v := a.(type) {
+			case float64:
+				af = v
+			case int:
+				af = float64(v)
+			case int64:
+				af = float64(v)
+			}
+			switch v := b.(type) {
+			case float64:
+				bf = v
+			case int:
+				bf = float64(v)
+			case int64:
+				bf = float64(v)
+			}
+			return af - bf
 		},
 		"formatDuration": func(seconds *int64) string {
 			if seconds == nil {

@@ -96,7 +96,11 @@
                         <tbody>
                             {{range $service := $host.Services}}
                             <tr class="border-b hover:bg-gray-50">
-                                <td class="py-2 px-4 font-medium">{{$service.Name}}</td>
+                                <td class="py-2 px-4 font-medium">
+                                    <a href="/service/{{$host.ID}}/{{$service.Name}}" class="text-blue-600 hover:text-blue-800 hover:underline">
+                                        {{$service.Name}}
+                                    </a>
+                                </td>
                                 <td class="py-2 px-4 text-sm text-gray-600">{{$service.TypeName}}</td>
                                 <td class="py-2 px-4">
                                     <span class="px-2 py-1 rounded text-xs {{if eq $service.Status 0}}bg-green-500{{else if eq $service.Status 2}}bg-yellow-500{{else if eq $service.Status 1}}bg-red-500{{else}}bg-gray-500{{end}} text-white">

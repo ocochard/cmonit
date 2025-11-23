@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{{.Service.Name}} - cmonit</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <meta http-equiv="refresh" content="60">
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto px-4 py-8">
+        <!-- Breadcrumb Navigation -->
+        <nav class="text-sm text-gray-500 mb-4">
+            <a href="/" class="hover:text-gray-700 hover:underline">Status Overview</a>
+            <span class="mx-2">/</span>
+            <a href="/host/{{.HostID}}" class="hover:text-gray-700 hover:underline">{{.Hostname}}</a>
+            <span class="mx-2">/</span>
+            <span class="text-gray-900">{{.Service.Name}}</span>
+        </nav>
+
+        <h1 class="text-4xl font-bold text-gray-800 mb-4">Service Details: {{.Service.Name}}</h1>
+        <p class="text-gray-600 mb-8">Last updated: {{.LastUpdate.Format "2006-01-02 15:04:05"}}</p>
+
+        <!-- Service Information Card -->
+        <div class="bg-white rounded-lg shadow-md mb-6">
+            <div class="{{if eq .Service.Status 0}}bg-green-600{{else if eq .Service.Status 2}}bg-yellow-600{{else if eq .Service.Status 1}}bg-red-600{{else}}bg-gray-600{{end}} text-white px-6 py-4 rounded-t-lg">
+                <h2 class="text-2xl font-semibold">{{.Service.Name}}</h2>
+                <p class="text-sm opacity-90">{{.Service.TypeName}} Service on {{.Hostname}}</p>
+            </div>
+
+            <div class="p-6">
+                <!-- Basic Service Info -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                    <div>
+                        <div class="text-xs text-gray-500 uppercase mb-1">Status</div>
+                        <span class="px-3 py-1 rounded text-sm {{if eq .Service.Status 0}}bg-green-500{{else if eq .Service.Status 2}}bg-yellow-500{{else if eq .Service.Status 1}}bg-red-500{{else}}bg-gray-500{{end}} text-white inline-block">
+                            {{.Service.StatusMessage}}
+                        </span>
+                    </div>
+                    <div>
+                        <div class="text-xs text-gray-500 uppercase mb-1">Type</div>
+                        <div class="font-semibold">{{.Service.TypeName}}</div>
+                    </div>
+                    <div>
+                        <div class="text-xs text-gray-500 uppercase mb-1">Monitoring</div>
+                        <div class="font-semibold">{{if eq .Service.Monitor 1}}Enabled{{else}}Disabled{{end}}</div>
+                    </div>
+                    <div>
+                        <div class="text-xs text-gray-500 uppercase mb-1">Last Checked</div>
+                        <div class="font-semibold">{{.Service.CollectedAt.Format "15:04:05"}}</div>
+                    </div>
+                </div>
+
+                {{if .FilesystemData}}
+                <!-- Filesystem Metrics -->
+                <div class="border-t pt-6">
+                    <h3 class="text-xl font-semibold mb-4">Filesystem Metrics</h3>
+
+                    <!-- Filesystem Info -->
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                        <div>
+                            <div class="text-xs text-gray-500 uppercase mb-1">Filesystem Type</div>
+                            <div class="font-semibold">{{.FilesystemData.FSType}}</div>
+                        </div>
+                        <div>
+                            <div class="text-xs text-gray-500 uppercase mb-1">Permissions</div>
+                            <div class="font-semibold">{{.FilesystemData.Mode}}</div>
+                        </div>
+                        <div>
+                            <div class="text-xs text-gray-500 uppercase mb-1">Owner</div>
+                            <div class="font-semibold">{{.FilesystemData.UID}}:{{.FilesystemData.GID}}</div>
+                        </div>
+                        <div>
+                            <div class="text-xs text-gray-500 uppercase mb-1">Mount Flags</div>
+                            <div class="text-sm">{{.FilesystemData.FSFlags}}</div>
+                        </div>
+                    </div>
+
+                    <!-- Disk Usage -->
+                    <div class="mb-6">
+                        <h4 class="font-semibold mb-2">Disk Space Usage</h4>
+                        <div class="bg-gray-200 rounded-full h-6 overflow-hidden mb-2">
+                            <div class="{{if lt .FilesystemData.BlockPercent 80.0}}bg-green-500{{else if lt .FilesystemData.BlockPercent 90.0}}bg-yellow-500{{else}}bg-red-500{{end}} h-full flex items-center justify-center text-white text-sm font-semibold" style="width: {{.FilesystemData.BlockPercent}}%">
+                                {{printf "%.1f" .FilesystemData.BlockPercent}}%
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-3 gap-4 text-sm">
+                            <div>
+                                <span class="text-gray-500">Used:</span>
+                                <span class="font-semibold">{{printf "%.1f" (divf .FilesystemData.BlockUsageMB 1024)}} GB</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-500">Free:</span>
+                                <span class="font-semibold">{{printf "%.1f" (divf (sub .FilesystemData.BlockTotalMB .FilesystemData.BlockUsageMB) 1024)}} GB</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-500">Total:</span>
+                                <span class="font-semibold">{{printf "%.1f" (divf .FilesystemData.BlockTotalMB 1024)}} GB</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Inode Usage -->
+                    <div class="mb-6">
+                        <h4 class="font-semibold mb-2">Inode Usage</h4>
+                        <div class="bg-gray-200 rounded-full h-6 overflow-hidden mb-2">
+                            <div class="bg-blue-500 h-full flex items-center justify-center text-white text-sm font-semibold" style="width: {{.FilesystemData.InodePercent}}%">
+                                {{printf "%.1f" .FilesystemData.InodePercent}}%
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-3 gap-4 text-sm">
+                            <div>
+                                <span class="text-gray-500">Used:</span>
+                                <span class="font-semibold">{{.FilesystemData.InodeUsage}}</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-500">Free:</span>
+                                <span class="font-semibold">{{sub .FilesystemData.InodeTotal .FilesystemData.InodeUsage}}</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-500">Total:</span>
+                                <span class="font-semibold">{{.FilesystemData.InodeTotal}}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- I/O Statistics -->
+                    <div>
+                        <h4 class="font-semibold mb-2">I/O Statistics</h4>
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div class="bg-gray-50 p-3 rounded">
+                                <div class="text-xs text-gray-500 uppercase mb-1">Total Read</div>
+                                <div class="font-semibold">{{printf "%.1f" (divf .FilesystemData.ReadBytesTotal 1073741824)}} GB</div>
+                                <div class="text-xs text-gray-500">{{.FilesystemData.ReadOpsTotal}} ops</div>
+                            </div>
+                            <div class="bg-gray-50 p-3 rounded">
+                                <div class="text-xs text-gray-500 uppercase mb-1">Total Written</div>
+                                <div class="font-semibold">{{printf "%.1f" (divf .FilesystemData.WriteBytesTotal 1073741824)}} GB</div>
+                                <div class="text-xs text-gray-500">{{.FilesystemData.WriteOpsTotal}} ops</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {{end}}
+
+                {{if .ProcessData}}
+                <!-- Process Metrics -->
+                <div class="border-t pt-6">
+                    <h3 class="text-xl font-semibold mb-4">Process Metrics</h3>
+
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div>
+                            <div class="text-xs text-gray-500 uppercase mb-1">Process ID</div>
+                            <div class="font-semibold">{{.ProcessData.PID}}</div>
+                        </div>
+                        <div>
+                            <div class="text-xs text-gray-500 uppercase mb-1">CPU Usage</div>
+                            <div class="font-semibold">{{printf "%.1f" .ProcessData.CPUPercent}}%</div>
+                        </div>
+                        <div>
+                            <div class="text-xs text-gray-500 uppercase mb-1">Memory Usage</div>
+                            <div class="font-semibold">{{printf "%.1f" .ProcessData.MemoryPercent}}%</div>
+                        </div>
+                        <div>
+                            <div class="text-xs text-gray-500 uppercase mb-1">Memory Size</div>
+                            <div class="font-semibold">{{printf "%.1f" (divf .ProcessData.MemoryKB 1024)}} MB</div>
+                        </div>
+                    </div>
+                </div>
+                {{end}}
+
+                <!-- Back Link -->
+                <div class="border-t pt-6 mt-6">
+                    <a href="/host/{{.HostID}}" class="inline-block bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded transition-colors">
+                        Back to {{.Hostname}} Dashboard
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

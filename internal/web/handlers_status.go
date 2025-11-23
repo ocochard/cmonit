@@ -1,6 +1,7 @@
 package web
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"net/http"
@@ -411,6 +412,45 @@ func getEventTypeName(eventType int) string {
 	}
 }
 
+// HandleServiceDetail serves the service detail page showing detailed metrics.
+func HandleServiceDetail(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract host ID and service name from URL path: /service/{host_id}/{service_name}
+	path := strings.TrimPrefix(r.URL.Path, "/service/")
+	parts := strings.SplitN(path, "/", 2)
+
+	if len(parts) != 2 {
+		http.Error(w, "Invalid service path", http.StatusBadRequest)
+		return
+	}
+
+	hostID := parts[0]
+	serviceName := parts[1]
+
+	if hostID == "" || serviceName == "" {
+		http.Error(w, "Host ID and service name required", http.StatusBadRequest)
+		return
+	}
+
+	data, err := getServiceDetailData(hostID, serviceName)
+	if err != nil {
+		log.Printf("[ERROR] Failed to get service detail data for %s/%s: %v", hostID, serviceName, err)
+		http.Error(w, "Failed to load service data", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	err = templates.ExecuteTemplate(w, "service.html", data)
+	if err != nil {
+		log.Printf("[ERROR] Failed to render template: %v", err)
+	}
+}
+
 // getSystemMetrics retrieves the latest CPU and memory metrics for a host.
 //
 // Returns CPU and memory percentages from the metrics table.
@@ -461,4 +501,129 @@ func getSystemMetrics(hostID, hostname string) (*float64, *float64) {
 	}
 
 	return &cpuPercent, &memPercent
+}
+
+// getServiceDetailData retrieves detailed information about a specific service.
+func getServiceDetailData(hostID, serviceName string) (*ServiceDetailData, error) {
+	// Query service information
+	const serviceQuery = `
+		SELECT name, type, status, monitor, pid, cpu_percent, memory_percent, memory_kb, collected_at
+		FROM services
+		WHERE host_id = ? AND name = ?
+		ORDER BY collected_at DESC
+		LIMIT 1
+	`
+
+	var svc Service
+	err := db.QueryRow(serviceQuery, hostID, serviceName).Scan(
+		&svc.Name,
+		&svc.Type,
+		&svc.Status,
+		&svc.Monitor,
+		&svc.PID,
+		&svc.CPUPercent,
+		&svc.MemoryPercent,
+		&svc.MemoryKB,
+		&svc.CollectedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("service not found: %w", err)
+	}
+
+	// Convert type and status to human-readable
+	svc.TypeName = getServiceTypeName(svc.Type)
+	svc.StatusName, svc.StatusColor = getServiceStatusInfo(svc.Status)
+
+	// Get hostname
+	var hostname string
+	err = db.QueryRow("SELECT hostname FROM hosts WHERE id = ?", hostID).Scan(&hostname)
+	if err != nil {
+		hostname = hostID // Fallback to host ID if hostname not found
+	}
+
+	data := &ServiceDetailData{
+		HostID:     hostID,
+		Hostname:   hostname,
+		Service:    svc,
+		LastUpdate: time.Now(),
+	}
+
+	// Get filesystem metrics if this is a filesystem service (type 0)
+	if svc.Type == 0 {
+		data.FilesystemData, err = getFilesystemMetrics(hostID, serviceName)
+		if err != nil {
+			log.Printf("[WARN] Failed to get filesystem metrics for %s/%s: %v", hostID, serviceName, err)
+		}
+	}
+
+	// Get process metrics if this is a process service (type 3)
+	if svc.Type == 3 {
+		data.ProcessData = &ProcessMetrics{
+			PID:           *svc.PID,
+			CPUPercent:    *svc.CPUPercent,
+			MemoryPercent: *svc.MemoryPercent,
+			MemoryKB:      *svc.MemoryKB,
+		}
+	}
+
+	return data, nil
+}
+
+// getFilesystemMetrics retrieves the latest filesystem metrics for a service.
+func getFilesystemMetrics(hostID, serviceName string) (*FilesystemMetrics, error) {
+	const query = `
+		SELECT fs_type, fs_flags, mode, uid, gid,
+		       block_percent, block_usage_mb, block_total_mb,
+		       inode_percent, inode_usage, inode_total,
+		       read_bytes_total, read_ops_total,
+		       write_bytes_total, write_ops_total
+		FROM filesystem_metrics
+		WHERE host_id = ? AND service_name = ?
+		ORDER BY collected_at DESC
+		LIMIT 1
+	`
+
+	var fm FilesystemMetrics
+	var fsType, fsFlags, mode sql.NullString
+	var uid, gid sql.NullInt64
+
+	err := db.QueryRow(query, hostID, serviceName).Scan(
+		&fsType,
+		&fsFlags,
+		&mode,
+		&uid,
+		&gid,
+		&fm.BlockPercent,
+		&fm.BlockUsageMB,
+		&fm.BlockTotalMB,
+		&fm.InodePercent,
+		&fm.InodeUsage,
+		&fm.InodeTotal,
+		&fm.ReadBytesTotal,
+		&fm.ReadOpsTotal,
+		&fm.WriteBytesTotal,
+		&fm.WriteOpsTotal,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert nullable fields
+	if fsType.Valid {
+		fm.FSType = fsType.String
+	}
+	if fsFlags.Valid {
+		fm.FSFlags = fsFlags.String
+	}
+	if mode.Valid {
+		fm.Mode = mode.String
+	}
+	if uid.Valid {
+		fm.UID = int(uid.Int64)
+	}
+	if gid.Valid {
+		fm.GID = int(gid.Int64)
+	}
+
+	return &fm, nil
 }

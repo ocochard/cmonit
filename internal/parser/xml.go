@@ -303,6 +303,16 @@ type Service struct {
 	// File contains file-specific information (size, permissions, checksum)
 	// Only present when Type == 2 (file service)
 	File *FileInfo `xml:",omitempty"`
+
+	// Filesystem fields (for type 0 - filesystem services)
+	// These are directly in the <service> element, not nested
+	FSType   *string                   `xml:"fstype,omitempty"`
+	FSFlags  *string                   `xml:"fsflags,omitempty"`
+	FSMode   *string                   `xml:"mode,omitempty"`
+	Block    *FilesystemBlock          `xml:"block,omitempty"`
+	Inode    *FilesystemInode          `xml:"inode,omitempty"`
+	ReadIO   *FilesystemIO             `xml:"read,omitempty"`
+	WriteIO  *FilesystemIO             `xml:"write,omitempty"`
 }
 
 // SystemMetrics contains system-level performance metrics.
@@ -559,6 +569,136 @@ type FileInfo struct {
 	//           ^^^^^^^^^^^^ this is ChecksumType
 	//                        ^^^^^^ this is Checksum
 	ChecksumType string `xml:"checksum>type,attr"`
+}
+
+// FilesystemInfo contains filesystem-specific information.
+//
+// Only present for filesystem services (type 0).
+//
+// Example XML:
+// <fstype>zfs</fstype>
+// <fsflags>nfs4acls, noatime, local</fsflags>
+// <mode>755</mode>
+// <uid>0</uid>
+// <gid>0</gid>
+// <block><percent>90.5</percent><usage>27226910.4</usage><total>30089135.8</total></block>
+// <inode><percent>0.0</percent><usage>803919</usage><total>5862641503</total></inode>
+// <read>...</read>
+// <write>...</write>
+type FilesystemInfo struct {
+	// FSType is the filesystem type (zfs, ext4, xfs, etc.)
+	FSType string `xml:"fstype"`
+
+	// FSFlags contains mount flags (ro, rw, noatime, etc.)
+	FSFlags string `xml:"fsflags"`
+
+	// Mode is the Unix directory permissions (octal format)
+	Mode string `xml:"mode"`
+
+	// UID is the user ID that owns the filesystem mount point
+	UID int `xml:"uid"`
+
+	// GID is the group ID that owns the filesystem mount point
+	GID int `xml:"gid"`
+
+	// Block contains block/space usage information
+	Block FilesystemBlock `xml:"block"`
+
+	// Inode contains inode usage information
+	Inode FilesystemInode `xml:"inode"`
+
+	// Read contains read I/O statistics
+	Read FilesystemIO `xml:"read"`
+
+	// Write contains write I/O statistics
+	Write FilesystemIO `xml:"write"`
+}
+
+// FilesystemBlock contains block/space usage information.
+type FilesystemBlock struct {
+	// Percent is the % of space used (0-100)
+	Percent float64 `xml:"percent"`
+
+	// Usage is the amount of space used (in MB)
+	Usage float64 `xml:"usage"`
+
+	// Total is the total space available (in MB)
+	Total float64 `xml:"total"`
+}
+
+// FilesystemInode contains inode usage information.
+//
+// Inodes are filesystem data structures that store file metadata.
+// Each file/directory requires one inode.
+// Running out of inodes prevents creating new files even if space is available.
+type FilesystemInode struct {
+	// Percent is the % of inodes used (0-100)
+	Percent float64 `xml:"percent"`
+
+	// Usage is the number of inodes used
+	Usage int64 `xml:"usage"`
+
+	// Total is the total number of inodes available
+	Total int64 `xml:"total"`
+}
+
+// FilesystemIO contains filesystem I/O statistics.
+type FilesystemIO struct {
+	// Bytes contains byte transfer statistics
+	Bytes FilesystemBytes `xml:"bytes"`
+
+	// Operations contains I/O operation count statistics
+	Operations FilesystemOperations `xml:"operations"`
+}
+
+// FilesystemBytes contains byte transfer statistics.
+type FilesystemBytes struct {
+	// Count is the bytes transferred in the current interval
+	Count int64 `xml:"count"`
+
+	// Total is the total bytes transferred since system boot
+	Total int64 `xml:"total"`
+}
+
+// FilesystemOperations contains I/O operation count statistics.
+type FilesystemOperations struct {
+	// Count is the number of operations in the current interval
+	Count int64 `xml:"count"`
+
+	// Total is the total number of operations since system boot
+	Total int64 `xml:"total"`
+}
+
+// StatusMessage returns a human-readable status message based on the status code.
+// Monit uses numeric status codes that need to be translated for display.
+//
+// Status codes (from Monit documentation):
+//   - 0 = Running/OK/Accessible
+//   - 1 = Failed/Does not exist
+//   - 2 = Resource limit matched (WARNING)
+//   - 4 = Execution failed
+//   - 8 = Not monitored
+//   - 16 = Initializing
+//
+// Returns:
+//   - string: Human-readable status message
+func (s *Service) StatusMessage() string {
+	switch s.Status {
+	case 0:
+		return "OK"
+	case 1:
+		return "Failed"
+	case 2:
+		return "Resource limit matched"
+	case 4:
+		return "Execution failed"
+	case 8:
+		return "Not monitored"
+	case 16:
+		return "Initializing"
+	default:
+		return fmt.Sprintf("Unknown status (%d)", s.Status)
+	}
 }
 
 // ParseMonitXML parses Monit XML status data into a MonitStatus struct.

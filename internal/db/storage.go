@@ -733,8 +733,13 @@ func StoreMonitStatus(db *sql.DB, status *parser.MonitStatus) error {
 				log.Printf("[WARN] Failed to store process metrics for %s: %v", service.Name, err)
 			}
 
+		case 0: // Filesystem service
+			err = StoreFilesystemMetrics(db, hostID, service)
+			if err != nil {
+				log.Printf("[WARN] Failed to store filesystem metrics for %s: %v", service.Name, err)
+			}
+
 		// TODO: Add handlers for other service types:
-		// case 0: // Filesystem
 		// case 2: // File
 		// case 7: // Program
 		// etc.
@@ -744,6 +749,114 @@ func StoreMonitStatus(db *sql.DB, status *parser.MonitStatus) error {
 	// Success!
 	log.Printf("[INFO] Stored status for host %s: %d services",
 		status.Server.LocalHostname, len(status.Services))
+
+	return nil
+}
+
+// StoreFilesystemMetrics stores filesystem service metrics into the database.
+//
+// This function is called for filesystem services (type 0) to record:
+// - Disk space usage (percent, MB used, MB total)
+// - Inode usage (percent, used, total)
+// - I/O statistics (read/write bytes and operations)
+// - Filesystem metadata (type, flags, permissions)
+//
+// Parameters:
+//   - db: Database connection
+//   - hostID: Host identifier (from hosts table)
+//   - service: Parsed service data from Monit XML
+//
+// Returns:
+//   - error: nil if successful, error describing problem if failed
+func StoreFilesystemMetrics(db *sql.DB, hostID string, service *parser.Service) error {
+	// Check if this is actually a filesystem service
+	if service.Type != 0 {
+		// Not a filesystem service, nothing to do
+		return nil
+	}
+
+	// Check if filesystem metrics are present
+	// At least one of the key filesystem fields should be non-nil
+	if service.Block == nil {
+		// No filesystem metrics in this service (shouldn't happen for type 0, but be safe)
+		return nil
+	}
+
+	// Get the collection timestamp
+	collectedAt := service.GetCollectedTime()
+
+	// Helper function to safely get string value
+	getString := func(s *string) string {
+		if s != nil {
+			return *s
+		}
+		return ""
+	}
+
+	// Helper function to safely get int64 value
+	getInt64 := func(i *int64) int64 {
+		if i != nil {
+			return *i
+		}
+		return 0
+	}
+
+	// Insert filesystem metrics into the database
+	//
+	// Using INSERT OR REPLACE means:
+	// - If this is the first metrics for this filesystem: insert new row
+	// - If we already have metrics: this will just insert a new row (time-series data)
+	//
+	// We store all filesystem data in one row for efficient querying
+	query := `
+		INSERT INTO filesystem_metrics (
+			host_id, service_name, fs_type, fs_flags, mode, uid, gid,
+			block_percent, block_usage_mb, block_total_mb,
+			inode_percent, inode_usage, inode_total,
+			read_bytes_total, read_ops_total,
+			write_bytes_total, write_ops_total,
+			collected_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`
+
+	// Get UID and GID from the service fields (these might be used for file system too)
+	var uid, gid int
+	if service.UID != nil {
+		uid = *service.UID
+	}
+	if service.GID != nil {
+		gid = *service.GID
+	}
+
+	_, err := db.Exec(query,
+		hostID,
+		service.Name,
+		getString(service.FSType),
+		getString(service.FSFlags),
+		getString(service.FSMode),
+		uid,
+		gid,
+		service.Block.Percent,
+		service.Block.Usage,
+		service.Block.Total,
+		service.Inode.Percent,
+		service.Inode.Usage,
+		service.Inode.Total,
+		getInt64(&service.ReadIO.Bytes.Total),
+		getInt64(&service.ReadIO.Operations.Total),
+		getInt64(&service.WriteIO.Bytes.Total),
+		getInt64(&service.WriteIO.Operations.Total),
+		collectedAt,
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to store filesystem metrics: %w", err)
+	}
+
+	if debugMode {
+		log.Printf("[DEBUG] Stored filesystem metrics for %s/%s (%.1f%% used, %s)",
+			hostID, service.Name, service.Block.Percent, getString(service.FSType))
+	}
 
 	return nil
 }

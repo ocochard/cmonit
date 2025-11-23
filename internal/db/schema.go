@@ -39,7 +39,7 @@ import (
 
 // currentSchemaVersion is the current database schema version.
 // Increment this when making schema changes that require migration.
-const currentSchemaVersion = 3
+const currentSchemaVersion = 4
 
 // SQL schema for the cmonit database
 //
@@ -283,6 +283,66 @@ const (
 	createEventsIndex = `
 	CREATE INDEX IF NOT EXISTS idx_events_time
 		ON events(created_at DESC);`
+
+	// createFilesystemMetricsTable creates the filesystem_metrics table
+	//
+	// This table stores filesystem-specific metrics (disk space, inodes, I/O).
+	// Only populated for filesystem services (type 0).
+	//
+	// Columns:
+	//   - id: Auto-incrementing integer
+	//   - host_id: Which host this metric is from
+	//   - service_name: Filesystem service name
+	//   - fs_type: Filesystem type (zfs, ext4, xfs, btrfs, etc.)
+	//   - fs_flags: Mount flags (ro, rw, noatime, etc.)
+	//   - mode: Directory permissions (octal)
+	//   - uid: User ID owner
+	//   - gid: Group ID owner
+	//   - block_percent: % of disk space used
+	//   - block_usage_mb: Disk space used (MB)
+	//   - block_total_mb: Total disk space (MB)
+	//   - inode_percent: % of inodes used
+	//   - inode_usage: Number of inodes used
+	//   - inode_total: Total number of inodes
+	//   - read_bytes_total: Total bytes read since boot
+	//   - read_ops_total: Total read operations since boot
+	//   - write_bytes_total: Total bytes written since boot
+	//   - write_ops_total: Total write operations since boot
+	//   - collected_at: When this data was collected
+	//
+	// This is time-series data like the metrics table, allowing us to
+	// track filesystem usage trends over time.
+	createFilesystemMetricsTable = `
+	CREATE TABLE IF NOT EXISTS filesystem_metrics (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		host_id TEXT NOT NULL,
+		service_name TEXT NOT NULL,
+		fs_type TEXT,
+		fs_flags TEXT,
+		mode TEXT,
+		uid INTEGER,
+		gid INTEGER,
+		block_percent REAL,
+		block_usage_mb REAL,
+		block_total_mb REAL,
+		inode_percent REAL,
+		inode_usage INTEGER,
+		inode_total INTEGER,
+		read_bytes_total INTEGER,
+		read_ops_total INTEGER,
+		write_bytes_total INTEGER,
+		write_ops_total INTEGER,
+		collected_at DATETIME NOT NULL,
+		FOREIGN KEY (host_id) REFERENCES hosts(id)
+	);`
+
+	// createFilesystemMetricsIndex creates index for fast filesystem metrics queries
+	//
+	// Optimizes queries like:
+	// "Show me disk space usage for /data on host123 over the last 24 hours"
+	createFilesystemMetricsIndex = `
+	CREATE INDEX IF NOT EXISTS idx_filesystem_metrics_lookup
+		ON filesystem_metrics(host_id, service_name, collected_at);`
 )
 
 // InitDB initializes the database and creates all tables.
@@ -483,6 +543,20 @@ func InitDB(dbPath string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to create events index: %w", err)
 	}
 
+	// Create filesystem_metrics table
+	_, err = db.Exec(createFilesystemMetricsTable)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to create filesystem_metrics table: %w", err)
+	}
+
+	// Create filesystem_metrics index
+	_, err = db.Exec(createFilesystemMetricsIndex)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to create filesystem_metrics index: %w", err)
+	}
+
 	log.Printf("[INFO] Database schema created successfully")
 
 	// Return the database connection
@@ -618,6 +692,28 @@ func migrateSchema(db *sql.DB, fromVersion, toVersion int) error {
 				return err
 			}
 			log.Printf("[INFO] Successfully migrated to schema version 3")
+
+		case 3:
+			// Migration from version 3 to version 4
+			// Add filesystem_metrics table for filesystem service support
+			log.Printf("[INFO] Migrating from v3 to v4: Adding filesystem_metrics table")
+
+			_, err := db.Exec(createFilesystemMetricsTable)
+			if err != nil {
+				return fmt.Errorf("migration v3->v4 failed creating table: %w", err)
+			}
+
+			_, err = db.Exec(createFilesystemMetricsIndex)
+			if err != nil {
+				return fmt.Errorf("migration v3->v4 failed creating index: %w", err)
+			}
+
+			fromVersion = 4
+			err = setSchemaVersion(db, fromVersion)
+			if err != nil {
+				return err
+			}
+			log.Printf("[INFO] Successfully migrated to schema version 4")
 
 		default:
 			return fmt.Errorf("no migration path from version %d", fromVersion)

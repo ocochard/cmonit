@@ -311,4 +311,6 @@ cmonit/
 
 ## License
 
+Co-Authored-By: 🤖 [Claude Code](https://claude.com/claude-code)
+
 See [LICENSE](LICENSE) file for details.

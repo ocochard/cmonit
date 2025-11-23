@@ -2,7 +2,7 @@
 
 An open-source M/Monit clone that collects and visualizes monitoring data from Monit agents.
 
-![cmonit Dashboard](../screenshot.png)
+![cmonit Dashboard](docs/screenshot.png)
 
 ## Features
 

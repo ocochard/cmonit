@@ -305,6 +305,29 @@ func main() {
 	// Used by action buttons on the dashboard
 	webMux.HandleFunc("/api/action", web.HandleActionAPI)
 
+	// M/Monit-compatible API endpoints
+	//
+	// These endpoints provide M/Monit HTTP API compatibility
+	// for integration with existing tools and scripts
+	//
+	// Status API - query host and service status
+	webMux.HandleFunc("/status/hosts", web.HandleMMStatusHosts)
+	webMux.HandleFunc("/status/hosts/", func(w http.ResponseWriter, r *http.Request) {
+		// Route to appropriate handler based on URL path
+		if strings.HasSuffix(r.URL.Path, "/services") {
+			web.HandleMMStatusServices(w, r)
+		} else {
+			web.HandleMMStatusHost(w, r)
+		}
+	})
+
+	// Events API - query events
+	webMux.HandleFunc("/events/list", web.HandleMMEventsList)
+	webMux.HandleFunc("/events/get/", web.HandleMMEventsGet)
+
+	// Admin API - host administration
+	webMux.HandleFunc("/admin/hosts", web.HandleMMAdminHosts)
+
 	// Start the collector HTTP server in a goroutine (lightweight thread)
 	//
 	// The "go" keyword runs a function concurrently

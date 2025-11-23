@@ -10,6 +10,8 @@ import (
 	"net/http"      // HTTP server
 	"strconv"       // String conversion (string to int, etc.)
 	"time"          // Time handling
+
+	"github.com/ocochard/cmonit/internal/control" // Monit control API client
 )
 
 // =============================================================================
@@ -370,4 +372,216 @@ func parseTimeRange(rangeStr string) (time.Duration, error) {
 	// - "1h30m" = 1.5 hours
 	// etc.
 	return time.ParseDuration(rangeStr)
+}
+
+// =============================================================================
+// ACTION API
+// =============================================================================
+
+// ActionRequest represents a request to perform an action on a service.
+//
+// This is sent by the frontend JavaScript when a user clicks an action button.
+//
+// Example JSON:
+//   {
+//     "host_id": "bigone-1763842004",
+//     "service": "nginx",
+//     "action": "restart"
+//   }
+type ActionRequest struct {
+	HostID  string `json:"host_id"`  // Host identifier
+	Service string `json:"service"`  // Service name
+	Action  string `json:"action"`   // Action to perform (start, stop, restart, monitor, unmonitor)
+}
+
+// ActionResponse represents the response from an action request.
+//
+// This is returned to the frontend to indicate success or failure.
+//
+// Example JSON success:
+//   {
+//     "success": true,
+//     "message": "Action 'restart' successfully sent to service 'nginx' on host 'bigone'"
+//   }
+//
+// Example JSON failure:
+//   {
+//     "success": false,
+//     "message": "Failed to execute action: invalid action 'foo'"
+//   }
+type ActionResponse struct {
+	Success bool   `json:"success"` // Whether the action succeeded
+	Message string `json:"message"` // Human-readable message
+}
+
+// HandleActionAPI handles requests to perform actions on services.
+//
+// URL format:
+//   POST /api/action
+//
+// Request body (JSON):
+//   {
+//     "host_id": "bigone-1763842004",
+//     "service": "nginx",
+//     "action": "restart"
+//   }
+//
+// Response (JSON):
+//   {
+//     "success": true,
+//     "message": "Action successfully sent"
+//   }
+//
+// This endpoint:
+// 1. Parses the JSON request
+// 2. Looks up the host's Monit credentials in the database
+// 3. Creates a MonitClient with those credentials
+// 4. Executes the requested action
+// 5. Returns success/failure
+func HandleActionAPI(w http.ResponseWriter, r *http.Request) {
+	// Only allow POST requests
+	if r.Method != http.MethodPost {
+		respondJSON(w, ActionResponse{
+			Success: false,
+			Message: "Method not allowed",
+		}, http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse JSON request body
+	var req ActionRequest
+	err := json.NewDecoder(r.Body).Decode(&req)
+	if err != nil {
+		log.Printf("[ERROR] Failed to parse action request: %v", err)
+		respondJSON(w, ActionResponse{
+			Success: false,
+			Message: "Invalid request body",
+		}, http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields
+	if req.HostID == "" {
+		respondJSON(w, ActionResponse{
+			Success: false,
+			Message: "Missing host_id",
+		}, http.StatusBadRequest)
+		return
+	}
+	if req.Service == "" {
+		respondJSON(w, ActionResponse{
+			Success: false,
+			Message: "Missing service",
+		}, http.StatusBadRequest)
+		return
+	}
+	if req.Action == "" {
+		respondJSON(w, ActionResponse{
+			Success: false,
+			Message: "Missing action",
+		}, http.StatusBadRequest)
+		return
+	}
+
+	// Query host credentials from database
+	hostInfo, err := getHostCredentials(req.HostID)
+	if err != nil {
+		log.Printf("[ERROR] Failed to get host credentials for %s: %v", req.HostID, err)
+		respondJSON(w, ActionResponse{
+			Success: false,
+			Message: "Host not found or missing credentials",
+		}, http.StatusNotFound)
+		return
+	}
+
+	// Log the action attempt
+	log.Printf("[INFO] Executing action '%s' on service '%s' (host: %s)",
+		req.Action, req.Service, hostInfo.Hostname)
+
+	// Create Monit client with host's credentials
+	client := control.NewMonitClient(
+		hostInfo.HTTPAddress,
+		hostInfo.HTTPPort,
+		hostInfo.HTTPUsername,
+		hostInfo.HTTPPassword,
+	)
+
+	// Execute the action
+	err = client.ExecuteAction(req.Service, req.Action)
+	if err != nil {
+		log.Printf("[ERROR] Failed to execute action: %v", err)
+		respondJSON(w, ActionResponse{
+			Success: false,
+			Message: "Failed to execute action: " + err.Error(),
+		}, http.StatusInternalServerError)
+		return
+	}
+
+	// Success!
+	log.Printf("[INFO] Action '%s' successfully sent to service '%s' on host '%s'",
+		req.Action, req.Service, hostInfo.Hostname)
+
+	respondJSON(w, ActionResponse{
+		Success: true,
+		Message: "Action '" + req.Action + "' successfully sent to service '" + req.Service + "' on host '" + hostInfo.Hostname + "'",
+	}, http.StatusOK)
+}
+
+// HostCredentials represents the information needed to control a Monit agent.
+//
+// This is retrieved from the database when executing actions.
+type HostCredentials struct {
+	Hostname     string // Human-readable hostname
+	HTTPAddress  string // Monit HTTP server address
+	HTTPPort     int    // Monit HTTP server port
+	HTTPSSL      int    // SSL enabled flag
+	HTTPUsername string // HTTP authentication username
+	HTTPPassword string // HTTP authentication password
+}
+
+// getHostCredentials retrieves the Monit connection info for a host.
+//
+// Parameters:
+//   - hostID: The host identifier
+//
+// Returns:
+//   - *HostCredentials: The host's connection information
+//   - error: Any database error
+func getHostCredentials(hostID string) (*HostCredentials, error) {
+	const query = `
+		SELECT hostname, http_address, http_port, http_ssl, http_username, http_password
+		FROM hosts
+		WHERE id = ?
+	`
+
+	var creds HostCredentials
+	err := db.QueryRow(query, hostID).Scan(
+		&creds.Hostname,
+		&creds.HTTPAddress,
+		&creds.HTTPPort,
+		&creds.HTTPSSL,
+		&creds.HTTPUsername,
+		&creds.HTTPPassword,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return &creds, nil
+}
+
+// respondJSON is a helper function to send JSON responses.
+//
+// Parameters:
+//   - w: HTTP response writer
+//   - data: Data to encode as JSON
+//   - statusCode: HTTP status code
+func respondJSON(w http.ResponseWriter, data interface{}, statusCode int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+
+	err := json.NewEncoder(w).Encode(data)
+	if err != nil {
+		log.Printf("[ERROR] Failed to encode JSON response: %v", err)
+	}
 }

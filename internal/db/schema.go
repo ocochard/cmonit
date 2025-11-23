@@ -60,6 +60,11 @@ const (
 	//   - hostname: Human-readable server name (e.g., "web-server-01")
 	//   - incarnation: Unix timestamp when Monit was started (changes on restart)
 	//   - version: Monit version string (e.g., "5.35.2")
+	//   - http_address: Monit HTTP server address (for remote control)
+	//   - http_port: Monit HTTP server port (usually 2812)
+	//   - http_ssl: Whether Monit uses HTTPS (0=no, 1=yes)
+	//   - http_username: Username for Monit HTTP authentication
+	//   - http_password: Password for Monit HTTP authentication
 	//   - last_seen: When we last received data from this host
 	//   - created_at: When we first saw this host
 	//
@@ -67,12 +72,20 @@ const (
 	// UNIQUE: hostname must be unique (one entry per server)
 	//
 	// DEFAULT CURRENT_TIMESTAMP: Automatically sets time fields to "now"
+	//
+	// The http_* fields allow cmonit to control Monit agents remotely.
+	// These are automatically extracted from the Monit XML status.
 	createHostsTable = `
 	CREATE TABLE IF NOT EXISTS hosts (
 		id TEXT PRIMARY KEY,
 		hostname TEXT NOT NULL,
 		incarnation INTEGER,
 		version TEXT,
+		http_address TEXT,
+		http_port INTEGER,
+		http_ssl INTEGER DEFAULT 0,
+		http_username TEXT,
+		http_password TEXT,
 		last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		UNIQUE(hostname)

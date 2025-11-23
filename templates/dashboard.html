@@ -37,20 +37,50 @@
                                 <th class="text-left py-2 px-4">Type</th>
                                 <th class="text-left py-2 px-4">Status</th>
                                 <th class="text-left py-2 px-4">Monitor</th>
+                                <th class="text-left py-2 px-4">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {{range $host.Services}}
+                            {{range $service := $host.Services}}
                             <tr class="border-b">
-                                <td class="py-2 px-4">{{.Name}}</td>
-                                <td class="py-2 px-4">{{.TypeName}}</td>
+                                <td class="py-2 px-4">{{$service.Name}}</td>
+                                <td class="py-2 px-4">{{$service.TypeName}}</td>
                                 <td class="py-2 px-4">
-                                    <span class="px-2 py-1 rounded text-xs {{if eq .Status 0}}bg-green-500{{else if eq .Status 1}}bg-yellow-500{{else}}bg-red-500{{end}} text-white">
-                                        {{.StatusName}}
+                                    <span class="px-2 py-1 rounded text-xs {{if eq $service.Status 0}}bg-green-500{{else if eq $service.Status 1}}bg-yellow-500{{else}}bg-red-500{{end}} text-white">
+                                        {{$service.StatusName}}
                                     </span>
                                 </td>
                                 <td class="py-2 px-4">
-                                    {{if eq .Monitor 1}}Yes{{else}}No{{end}}
+                                    {{if eq $service.Monitor 1}}Yes{{else}}No{{end}}
+                                </td>
+                                <td class="py-2 px-4">
+                                    <div class="flex gap-1">
+                                        {{if eq $service.Type 3}}
+                                            <button onclick="executeAction('{{$host.ID}}', '{{$service.Name}}', 'start')"
+                                                class="px-2 py-1 bg-green-500 hover:bg-green-600 text-white text-xs rounded" title="Start service">
+                                                ▶
+                                            </button>
+                                            <button onclick="executeAction('{{$host.ID}}', '{{$service.Name}}', 'stop')"
+                                                class="px-2 py-1 bg-red-500 hover:bg-red-600 text-white text-xs rounded" title="Stop service">
+                                                ■
+                                            </button>
+                                            <button onclick="executeAction('{{$host.ID}}', '{{$service.Name}}', 'restart')"
+                                                class="px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white text-xs rounded" title="Restart service">
+                                                ↻
+                                            </button>
+                                        {{end}}
+                                        {{if eq $service.Monitor 1}}
+                                            <button onclick="executeAction('{{$host.ID}}', '{{$service.Name}}', 'unmonitor')"
+                                                class="px-2 py-1 bg-gray-500 hover:bg-gray-600 text-white text-xs rounded" title="Disable monitoring">
+                                                ⊘
+                                            </button>
+                                        {{else}}
+                                            <button onclick="executeAction('{{$host.ID}}', '{{$service.Name}}', 'monitor')"
+                                                class="px-2 py-1 bg-green-500 hover:bg-green-600 text-white text-xs rounded" title="Enable monitoring">
+                                                ⊙
+                                            </button>
+                                        {{end}}
+                                    </div>
                                 </td>
                             </tr>
                             {{end}}
@@ -297,6 +327,50 @@
 
         // Reload metrics with new range
         loadMetrics(hostId, service, range);
+    }
+
+    // Execute action on service
+    async function executeAction(hostId, serviceName, action) {
+        // Confirm with user
+        const actionNames = {
+            'start': 'Start',
+            'stop': 'Stop',
+            'restart': 'Restart',
+            'monitor': 'Enable monitoring for',
+            'unmonitor': 'Disable monitoring for'
+        };
+
+        const actionText = actionNames[action] || action;
+        if (!confirm(`${actionText} service '${serviceName}'?`)) {
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/action', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    host_id: hostId,
+                    service: serviceName,
+                    action: action
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                alert('Success: ' + result.message);
+                // Reload page after a short delay to show updated status
+                setTimeout(() => window.location.reload(), 2000);
+            } else {
+                alert('Error: ' + result.message);
+            }
+        } catch (error) {
+            console.error('Failed to execute action:', error);
+            alert('Failed to execute action: ' + error.message);
+        }
     }
     </script>
 </body>

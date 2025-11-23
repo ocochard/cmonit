@@ -276,6 +276,10 @@ func main() {
 	// Used by Chart.js to draw graphs
 	webMux.HandleFunc("/api/metrics", web.HandleMetricsAPI)
 
+	// /api/action performs actions on services (start, stop, restart, etc.)
+	// Used by action buttons on the dashboard
+	webMux.HandleFunc("/api/action", web.HandleActionAPI)
+
 	// TODO: Add more web routes in Phase 3+
 	// webMux.HandleFunc("/host/", handleHostDetails)
 

@@ -111,6 +111,10 @@ type Server struct {
 	// HTTPD contains information about Monit's HTTP server
 	// (the server that serves the Monit web UI, not our cmonit server)
 	HTTPD HTTPDInfo `xml:"httpd"`
+
+	// Credentials contains the username and password for Monit's HTTP server
+	// This allows cmonit to control the Monit agent remotely
+	Credentials CredentialsInfo `xml:"credentials"`
 }
 
 // HTTPDInfo represents Monit's built-in HTTP server configuration.
@@ -132,6 +136,24 @@ type HTTPDInfo struct {
 	// SSL indicates whether Monit's HTTP server uses HTTPS
 	// 0 = no SSL, 1 = SSL enabled
 	SSL int `xml:"ssl"`
+}
+
+// CredentialsInfo represents Monit's HTTP server credentials.
+//
+// Monit sends its HTTP credentials in the XML when posting to the collector.
+// We can use these credentials to control the Monit agent remotely.
+//
+// Example XML:
+// <credentials>
+//   <username>admin</username>
+//   <password>monit</password>
+// </credentials>
+type CredentialsInfo struct {
+	// Username for HTTP Basic Authentication
+	Username string `xml:"username"`
+
+	// Password for HTTP Basic Authentication
+	Password string `xml:"password"`
 }
 
 // Platform represents operating system and hardware information.

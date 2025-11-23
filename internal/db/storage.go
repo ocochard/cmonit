@@ -75,9 +75,19 @@ func StoreHost(db *sql.DB, server *parser.Server) error {
 			hostname,
 			incarnation,
 			version,
+			http_address,
+			http_port,
+			http_ssl,
+			http_username,
+			http_password,
 			last_seen,
 			created_at
 		) VALUES (
+			?,
+			?,
+			?,
+			?,
+			?,
 			?,
 			?,
 			?,
@@ -100,13 +110,18 @@ func StoreHost(db *sql.DB, server *parser.Server) error {
 	// db.Exec() runs a query that doesn't return rows (INSERT, UPDATE, DELETE)
 	//
 	// The ? placeholders are replaced with the values in order:
-	//   1st ? = server.ID
+	//   1st ? = hostID (generated or from server.ID)
 	//   2nd ? = server.LocalHostname
 	//   3rd ? = server.Incarnation
 	//   4th ? = server.Version
-	//   5th ? = now (last_seen)
-	//   6th ? = server.ID (for the COALESCE subquery)
-	//   7th ? = now (created_at if new host)
+	//   5th ? = server.HTTPD.Address (Monit HTTP server address)
+	//   6th ? = server.HTTPD.Port (Monit HTTP server port)
+	//   7th ? = server.HTTPD.SSL (SSL enabled flag)
+	//   8th ? = server.Credentials.Username (HTTP auth username)
+	//   9th ? = server.Credentials.Password (HTTP auth password)
+	//   10th ? = now (last_seen)
+	//   11th ? = hostID (for the COALESCE subquery)
+	//   12th ? = now (created_at if new host)
 	//
 	// Why use placeholders instead of string formatting?
 	// - Prevents SQL injection attacks
@@ -124,6 +139,11 @@ func StoreHost(db *sql.DB, server *parser.Server) error {
 		server.LocalHostname,
 		server.Incarnation,
 		server.Version,
+		server.HTTPD.Address,
+		server.HTTPD.Port,
+		server.HTTPD.SSL,
+		server.Credentials.Username,
+		server.Credentials.Password,
 		now,
 		hostID,
 		now,

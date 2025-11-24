@@ -39,7 +39,7 @@ import (
 
 // currentSchemaVersion is the current database schema version.
 // Increment this when making schema changes that require migration.
-const currentSchemaVersion = 5
+const currentSchemaVersion = 6
 
 // SQL schema for the cmonit database
 //
@@ -403,6 +403,92 @@ const (
 	createNetworkMetricsIndex = `
 	CREATE INDEX IF NOT EXISTS idx_network_metrics_lookup
 		ON network_metrics(host_id, service_name, collected_at);`
+
+	// createFileMetricsTable creates the file_metrics table
+	//
+	// This table stores file monitoring metrics (permissions, size, timestamps, checksums).
+	// Only populated for file services (type 2).
+	//
+	// Columns:
+	//   - id: Auto-incrementing integer
+	//   - host_id: Which host this metric is from
+	//   - service_name: File service name (e.g., "metatron")
+	//   - mode: File permission mode (e.g., "644", "755")
+	//   - uid: User ID of file owner
+	//   - gid: Group ID of file owner
+	//   - size: File size in bytes
+	//   - hardlink: Number of hard links to the file
+	//   - access_time: Last access time (Unix timestamp)
+	//   - change_time: Last change time (Unix timestamp)
+	//   - modify_time: Last modification time (Unix timestamp)
+	//   - checksum_type: Checksum algorithm (MD5, SHA1)
+	//   - checksum_value: Checksum hash value
+	//   - collected_at: When this data was collected
+	//
+	// This is time-series data like the metrics table, allowing us to
+	// track file changes over time and detect unauthorized modifications.
+	createFileMetricsTable = `
+	CREATE TABLE IF NOT EXISTS file_metrics (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		host_id TEXT NOT NULL,
+		service_name TEXT NOT NULL,
+		mode TEXT,
+		uid INTEGER,
+		gid INTEGER,
+		size INTEGER,
+		hardlink INTEGER,
+		access_time INTEGER,
+		change_time INTEGER,
+		modify_time INTEGER,
+		checksum_type TEXT,
+		checksum_value TEXT,
+		collected_at DATETIME NOT NULL,
+		FOREIGN KEY (host_id) REFERENCES hosts(id)
+	);`
+
+	// createFileMetricsIndex creates index for fast file metrics queries
+	//
+	// Optimizes queries like:
+	// "Show me file changes for metatron on host123 over the last week"
+	createFileMetricsIndex = `
+	CREATE INDEX IF NOT EXISTS idx_file_metrics_lookup
+		ON file_metrics(host_id, service_name, collected_at);`
+
+	// createProgramMetricsTable creates the program_metrics table
+	//
+	// This table stores program status check metrics (exit status, output).
+	// Only populated for program services (type 7).
+	//
+	// Columns:
+	//   - id: Auto-incrementing integer
+	//   - host_id: Which host this metric is from
+	//   - service_name: Program service name (e.g., "temperature")
+	//   - started: Unix timestamp when program was last executed
+	//   - exit_status: Program exit status code (0=success, non-zero=error)
+	//   - output: Program stdout/stderr output (up to 512 bytes)
+	//   - collected_at: When this data was collected
+	//
+	// This is time-series data like the metrics table, allowing us to
+	// track program execution history and output over time.
+	createProgramMetricsTable = `
+	CREATE TABLE IF NOT EXISTS program_metrics (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		host_id TEXT NOT NULL,
+		service_name TEXT NOT NULL,
+		started INTEGER,
+		exit_status INTEGER,
+		output TEXT,
+		collected_at DATETIME NOT NULL,
+		FOREIGN KEY (host_id) REFERENCES hosts(id)
+	);`
+
+	// createProgramMetricsIndex creates index for fast program metrics queries
+	//
+	// Optimizes queries like:
+	// "Show me program execution history for temperature on host123 over the last day"
+	createProgramMetricsIndex = `
+	CREATE INDEX IF NOT EXISTS idx_program_metrics_lookup
+		ON program_metrics(host_id, service_name, collected_at);`
 )
 
 // InitDB initializes the database and creates all tables.
@@ -631,6 +717,34 @@ func InitDB(dbPath string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to create network_metrics index: %w", err)
 	}
 
+	// Create file_metrics table
+	_, err = db.Exec(createFileMetricsTable)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to create file_metrics table: %w", err)
+	}
+
+	// Create file_metrics index
+	_, err = db.Exec(createFileMetricsIndex)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to create file_metrics index: %w", err)
+	}
+
+	// Create program_metrics table
+	_, err = db.Exec(createProgramMetricsTable)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to create program_metrics table: %w", err)
+	}
+
+	// Create program_metrics index
+	_, err = db.Exec(createProgramMetricsIndex)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to create program_metrics index: %w", err)
+	}
+
 	log.Printf("[INFO] Database schema created successfully")
 
 	// Return the database connection
@@ -810,6 +924,40 @@ func migrateSchema(db *sql.DB, fromVersion, toVersion int) error {
 				return err
 			}
 			log.Printf("[INFO] Successfully migrated to schema version 5")
+
+		case 5:
+			// Migration from version 5 to version 6
+			// Add file_metrics and program_metrics tables
+			log.Printf("[INFO] Migrating from v5 to v6: Adding file_metrics and program_metrics tables")
+
+			// Create file_metrics table
+			_, err := db.Exec(createFileMetricsTable)
+			if err != nil {
+				return fmt.Errorf("migration v5->v6 failed creating file_metrics table: %w", err)
+			}
+
+			_, err = db.Exec(createFileMetricsIndex)
+			if err != nil {
+				return fmt.Errorf("migration v5->v6 failed creating file_metrics index: %w", err)
+			}
+
+			// Create program_metrics table
+			_, err = db.Exec(createProgramMetricsTable)
+			if err != nil {
+				return fmt.Errorf("migration v5->v6 failed creating program_metrics table: %w", err)
+			}
+
+			_, err = db.Exec(createProgramMetricsIndex)
+			if err != nil {
+				return fmt.Errorf("migration v5->v6 failed creating program_metrics index: %w", err)
+			}
+
+			fromVersion = 6
+			err = setSchemaVersion(db, fromVersion)
+			if err != nil {
+				return err
+			}
+			log.Printf("[INFO] Successfully migrated to schema version 6")
 
 		default:
 			return fmt.Errorf("no migration path from version %d", fromVersion)

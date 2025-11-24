@@ -167,6 +167,78 @@
                 </div>
                 {{end}}
 
+                {{if .FileData}}
+                <!-- File Metrics -->
+                <div class="border-t pt-6">
+                    <h3 class="text-xl font-semibold mb-4">File Metrics</h3>
+
+                    <!-- File Information --><div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                        <div>
+                            <div class="text-xs text-gray-500 uppercase mb-1">Permissions</div>
+                            <div class="font-semibold font-mono">{{.FileData.Mode}}</div>
+                        </div>
+                        <div>
+                            <div class="text-xs text-gray-500 uppercase mb-1">Owner</div>
+                            <div class="font-semibold">{{.FileData.UID}}:{{.FileData.GID}}</div>
+                        </div>
+                        <div>
+                            <div class="text-xs text-gray-500 uppercase mb-1">File Size</div>
+                            <div class="font-semibold">
+                                {{if ge .FileData.Size 1073741824}}
+                                    {{printf "%.2f" (divf .FileData.Size 1073741824)}} GB
+                                {{else if ge .FileData.Size 1048576}}
+                                    {{printf "%.2f" (divf .FileData.Size 1048576)}} MB
+                                {{else if ge .FileData.Size 1024}}
+                                    {{printf "%.2f" (divf .FileData.Size 1024)}} KB
+                                {{else}}
+                                    {{.FileData.Size}} bytes
+                                {{end}}
+                            </div>
+                        </div>
+                        <div>
+                            <div class="text-xs text-gray-500 uppercase mb-1">Hard Links</div>
+                            <div class="font-semibold">{{.FileData.Hardlink}}</div>
+                        </div>
+                    </div>
+
+                    <!-- Timestamps -->
+                    <div class="mb-6">
+                        <h4 class="font-semibold mb-3">Timestamps</h4>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div class="bg-gray-50 p-3 rounded">
+                                <div class="text-xs text-gray-500 uppercase mb-1">Last Access</div>
+                                <div class="font-semibold">{{if .FileData.AccessTime}}{{.FileData.AccessTime}}{{else}}N/A{{end}}</div>
+                            </div>
+                            <div class="bg-gray-50 p-3 rounded">
+                                <div class="text-xs text-gray-500 uppercase mb-1">Last Modified</div>
+                                <div class="font-semibold">{{if .FileData.ModifyTime}}{{.FileData.ModifyTime}}{{else}}N/A{{end}}</div>
+                            </div>
+                            <div class="bg-gray-50 p-3 rounded">
+                                <div class="text-xs text-gray-500 uppercase mb-1">Last Change</div>
+                                <div class="font-semibold">{{if .FileData.ChangeTime}}{{.FileData.ChangeTime}}{{else}}N/A{{end}}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Checksum -->
+                    <div>
+                        <h4 class="font-semibold mb-3">Checksum</h4>
+                        <div class="bg-gray-50 p-4 rounded">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <div class="text-xs text-gray-500 uppercase mb-1">Algorithm</div>
+                                    <div class="font-semibold">{{if .FileData.ChecksumType}}{{.FileData.ChecksumType}}{{else}}N/A{{end}}</div>
+                                </div>
+                                <div>
+                                    <div class="text-xs text-gray-500 uppercase mb-1">Value</div>
+                                    <div class="font-mono text-sm break-all">{{if .FileData.ChecksumValue}}{{.FileData.ChecksumValue}}{{else}}N/A{{end}}</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {{end}}
+
                 {{if .NetworkData}}
                 <!-- Network Interface Metrics -->
                 <div class="border-t pt-6">
@@ -253,6 +325,48 @@
                                 <div class="font-semibold text-lg {{if gt .NetworkData.UploadErrorsNow 0}}text-red-600{{end}}">{{.NetworkData.UploadErrorsNow}}</div>
                                 <div class="text-xs text-gray-500">Total: {{.NetworkData.UploadErrorsTotal}}</div>
                             </div>
+                        </div>
+                    </div>
+                </div>
+                {{end}}
+
+                {{if .ProgramData}}
+                <!-- Program Metrics -->
+                <div class="border-t pt-6">
+                    <h3 class="text-xl font-semibold mb-4">Program Metrics</h3>
+
+                    <!-- Program Status -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                        <div class="bg-gray-50 p-4 rounded">
+                            <div class="text-xs text-gray-500 uppercase mb-1">Exit Status</div>
+                            <div class="text-2xl font-bold {{if eq .ProgramData.ExitStatus 0}}text-green-600{{else}}text-red-600{{end}}">
+                                {{.ProgramData.ExitStatus}}
+                            </div>
+                            <div class="text-xs mt-1">
+                                {{if eq .ProgramData.ExitStatus 0}}
+                                    <span class="text-green-600">Success</span>
+                                {{else}}
+                                    <span class="text-red-600">Failed</span>
+                                {{end}}
+                            </div>
+                        </div>
+                        <div class="bg-gray-50 p-4 rounded">
+                            <div class="text-xs text-gray-500 uppercase mb-1">Last Started</div>
+                            <div class="font-semibold">
+                                {{if .ProgramData.Started}}{{.ProgramData.Started}}{{else}}N/A{{end}}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Program Output -->
+                    <div>
+                        <h4 class="font-semibold mb-3">Last Output</h4>
+                        <div class="bg-gray-900 text-gray-100 p-4 rounded font-mono text-sm overflow-x-auto">
+                            {{if .ProgramData.Output}}
+                                <pre class="whitespace-pre-wrap">{{.ProgramData.Output}}</pre>
+                            {{else}}
+                                <span class="text-gray-500">No output available</span>
+                            {{end}}
                         </div>
                     </div>
                 </div>

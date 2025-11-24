@@ -566,6 +566,22 @@ func getServiceDetailData(hostID, serviceName string) (*ServiceDetailData, error
 		}
 	}
 
+	// Get file metrics if this is a file service (type 2)
+	if svc.Type == 2 {
+		data.FileData, err = getFileMetrics(hostID, serviceName)
+		if err != nil {
+			log.Printf("[WARN] Failed to get file metrics for %s/%s: %v", hostID, serviceName, err)
+		}
+	}
+
+	// Get program metrics if this is a program service (type 7)
+	if svc.Type == 7 {
+		data.ProgramData, err = getProgramMetrics(hostID, serviceName)
+		if err != nil {
+			log.Printf("[WARN] Failed to get program metrics for %s/%s: %v", hostID, serviceName, err)
+		}
+	}
+
 	// Get network metrics if this is a network interface service (type 8)
 	if svc.Type == 8 {
 		data.NetworkData, err = getNetworkMetrics(hostID, serviceName)
@@ -675,4 +691,108 @@ func getNetworkMetrics(hostID, serviceName string) (*NetworkMetrics, error) {
 	}
 
 	return &nm, nil
+}
+
+// getFileMetrics retrieves the latest file metrics for a service.
+func getFileMetrics(hostID, serviceName string) (*FileMetrics, error) {
+	const query = `
+		SELECT mode, uid, gid, size, hardlink,
+		       access_time, change_time, modify_time,
+		       checksum_type, checksum_value
+		FROM file_metrics
+		WHERE host_id = ? AND service_name = ?
+		ORDER BY collected_at DESC
+		LIMIT 1
+	`
+
+	var fm FileMetrics
+	var mode, checksumType, checksumValue sql.NullString
+	var uid, gid, size, hardlink, accessTime, changeTime, modifyTime sql.NullInt64
+
+	err := db.QueryRow(query, hostID, serviceName).Scan(
+		&mode,
+		&uid,
+		&gid,
+		&size,
+		&hardlink,
+		&accessTime,
+		&changeTime,
+		&modifyTime,
+		&checksumType,
+		&checksumValue,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert nullable fields
+	if mode.Valid {
+		fm.Mode = mode.String
+	}
+	if uid.Valid {
+		fm.UID = int(uid.Int64)
+	}
+	if gid.Valid {
+		fm.GID = int(gid.Int64)
+	}
+	if size.Valid {
+		fm.Size = size.Int64
+	}
+	if hardlink.Valid {
+		fm.Hardlink = int(hardlink.Int64)
+	}
+	if accessTime.Valid {
+		fm.AccessTime = accessTime.Int64
+	}
+	if changeTime.Valid {
+		fm.ChangeTime = changeTime.Int64
+	}
+	if modifyTime.Valid {
+		fm.ModifyTime = modifyTime.Int64
+	}
+	if checksumType.Valid {
+		fm.ChecksumType = checksumType.String
+	}
+	if checksumValue.Valid {
+		fm.ChecksumValue = checksumValue.String
+	}
+
+	return &fm, nil
+}
+
+// getProgramMetrics retrieves the latest program metrics for a service.
+func getProgramMetrics(hostID, serviceName string) (*ProgramMetrics, error) {
+	const query = `
+		SELECT started, exit_status, output
+		FROM program_metrics
+		WHERE host_id = ? AND service_name = ?
+		ORDER BY collected_at DESC
+		LIMIT 1
+	`
+
+	var pm ProgramMetrics
+	var started, exitStatus sql.NullInt64
+	var output sql.NullString
+
+	err := db.QueryRow(query, hostID, serviceName).Scan(
+		&started,
+		&exitStatus,
+		&output,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert nullable fields
+	if started.Valid {
+		pm.Started = started.Int64
+	}
+	if exitStatus.Valid {
+		pm.ExitStatus = int(exitStatus.Int64)
+	}
+	if output.Valid {
+		pm.Output = output.String
+	}
+
+	return &pm, nil
 }

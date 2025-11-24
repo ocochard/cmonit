@@ -114,7 +114,9 @@ type ServiceDetailData struct {
 	Hostname        string             // Host display name
 	Service         Service            // Service information
 	FilesystemData  *FilesystemMetrics // Filesystem metrics (if type 0)
+	FileData        *FileMetrics       // File metrics (if type 2)
 	ProcessData     *ProcessMetrics    // Process metrics (if type 3)
+	ProgramData     *ProgramMetrics    // Program metrics (if type 7)
 	NetworkData     *NetworkMetrics    // Network metrics (if type 8)
 	LastUpdate      time.Time          // When this data was retrieved
 }
@@ -163,6 +165,27 @@ type NetworkMetrics struct {
 	UploadBytesTotal     int64   // Total upload bytes since boot
 	UploadErrorsNow      int64   // Current upload errors per second
 	UploadErrorsTotal    int64   // Total upload errors since boot
+}
+
+// FileMetrics holds file service metrics.
+type FileMetrics struct {
+	Mode          string // Permissions mode (e.g., "644")
+	UID           int    // Owner user ID
+	GID           int    // Owner group ID
+	Size          int64  // File size in bytes
+	Hardlink      int    // Number of hard links
+	AccessTime    int64  // Unix timestamp of last access
+	ChangeTime    int64  // Unix timestamp of last change
+	ModifyTime    int64  // Unix timestamp of last modification
+	ChecksumType  string // Checksum algorithm (e.g., "MD5")
+	ChecksumValue string // Checksum value
+}
+
+// ProgramMetrics holds program service metrics.
+type ProgramMetrics struct {
+	Started    int64  // Unix timestamp when program started
+	ExitStatus int    // Last exit status code
+	Output     string // Last output from program
 }
 
 // =============================================================================

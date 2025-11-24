@@ -744,16 +744,23 @@ func StoreMonitStatus(db *sql.DB, status *parser.MonitStatus) error {
 				log.Printf("[WARN] Failed to store filesystem metrics for %s: %v", service.Name, err)
 			}
 
+		case 2: // File service
+			err = StoreFileMetrics(db, hostID, service)
+			if err != nil {
+				log.Printf("[WARN] Failed to store file metrics for %s: %v", service.Name, err)
+			}
+
+		case 7: // Program service
+			err = StoreProgramMetrics(db, hostID, service)
+			if err != nil {
+				log.Printf("[WARN] Failed to store program metrics for %s: %v", service.Name, err)
+			}
+
 		case 8: // Network interface service
 			err = StoreNetworkMetrics(db, hostID, service)
 			if err != nil {
 				log.Printf("[WARN] Failed to store network metrics for %s: %v", service.Name, err)
 			}
-
-		// TODO: Add handlers for other service types:
-		// case 2: // File
-		// case 7: // Program
-		// etc.
 		}
 	}
 
@@ -980,6 +987,139 @@ func StoreNetworkMetrics(db *sql.DB, hostID string, service *parser.Service) err
 		log.Printf("[DEBUG] Stored network metrics for %s/%s (%.0f Mbps %s, link %s)",
 			hostID, service.Name, speedMbps, duplexStr,
 			map[int]string{0: "down", 1: "up"}[service.Link.State])
+	}
+
+	return nil
+}
+
+// StoreFileMetrics stores file service metrics into the database.
+//
+// This function captures file-specific monitoring data including:
+// - File permissions (mode)
+// - Owner/group (UID/GID)
+// - File size
+// - Hard link count
+// - Timestamps (access, change, modify)
+// - Checksum and checksum type
+//
+// Parameters:
+//   - db: Database connection
+//   - hostID: Host identifier (from hosts table)
+//   - service: Parsed service data from Monit XML
+//
+// Returns:
+//   - error: nil if successful, error describing problem if failed
+func StoreFileMetrics(db *sql.DB, hostID string, service *parser.Service) error {
+	// Check if this is actually a file service
+	if service.Type != 2 {
+		// Not a file service, nothing to do
+		return nil
+	}
+
+	// Check if file info is present
+	if service.File == nil {
+		// No file metrics in this service (shouldn't happen for type 2, but be safe)
+		return nil
+	}
+
+	// Get the collection timestamp
+	collectedAt := service.GetCollectedTime()
+
+	// Insert file metrics into the database
+	query := `
+		INSERT INTO file_metrics (
+			host_id, service_name,
+			mode, uid, gid,
+			size, hardlink,
+			access_time, change_time, modify_time,
+			checksum_type, checksum_value,
+			collected_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`
+
+	_, err := db.Exec(query,
+		hostID,
+		service.Name,
+		service.File.Mode,
+		service.File.UID,
+		service.File.GID,
+		service.File.Size,
+		service.File.Hardlink,
+		service.File.Timestamps.Access,
+		service.File.Timestamps.Change,
+		service.File.Timestamps.Modify,
+		service.File.Checksum.Type,
+		service.File.Checksum.Value,
+		collectedAt,
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to store file metrics: %w", err)
+	}
+
+	if debugMode {
+		log.Printf("[DEBUG] Stored file metrics for %s/%s (mode: %s, size: %d bytes, checksum: %s)",
+			hostID, service.Name, service.File.Mode, service.File.Size, service.File.Checksum.Type)
+	}
+
+	return nil
+}
+
+// StoreProgramMetrics stores program service metrics into the database.
+//
+// This function captures program status check data including:
+// - Program start time
+// - Exit status code
+// - Program output (stdout/stderr)
+//
+// Parameters:
+//   - db: Database connection
+//   - hostID: Host identifier (from hosts table)
+//   - service: Parsed service data from Monit XML
+//
+// Returns:
+//   - error: nil if successful, error describing problem if failed
+func StoreProgramMetrics(db *sql.DB, hostID string, service *parser.Service) error {
+	// Check if this is actually a program service
+	if service.Type != 7 {
+		// Not a program service, nothing to do
+		return nil
+	}
+
+	// Check if program info is present
+	if service.Program == nil {
+		// No program metrics in this service (shouldn't happen for type 7, but be safe)
+		return nil
+	}
+
+	// Get the collection timestamp
+	collectedAt := service.GetCollectedTime()
+
+	// Insert program metrics into the database
+	query := `
+		INSERT INTO program_metrics (
+			host_id, service_name,
+			started, exit_status, output,
+			collected_at
+		) VALUES (?, ?, ?, ?, ?, ?)
+	`
+
+	_, err := db.Exec(query,
+		hostID,
+		service.Name,
+		service.Program.Started,
+		service.Program.Status,
+		service.Program.Output,
+		collectedAt,
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to store program metrics: %w", err)
+	}
+
+	if debugMode {
+		log.Printf("[DEBUG] Stored program metrics for %s/%s (exit status: %d, started: %d)",
+			hostID, service.Name, service.Program.Status, service.Program.Started)
 	}
 
 	return nil

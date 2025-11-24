@@ -23,6 +23,8 @@ import (
 	"bytes"        // Byte slice operations
 	"encoding/xml" // XML parsing and generation
 	"fmt"          // Formatted I/O
+	"log"          // Logging
+	"os"           // Operating system functions
 	"time"         // Time and date functions
 )
 
@@ -57,10 +59,8 @@ type MonitStatus struct {
 	// Note: Not "services" (plural), but "service" (singular)
 	// Go will automatically collect all <service> elements into the slice
 	//
-	// When Monit POSTs to /collector, it wraps services in a <services> container:
-	// <services><service name="foo"><type>5</type>...</service></services>
-	// The "services>service" path tells Go to look for service elements inside services
-	Services []Service `xml:"services>service"`
+	// Monit sends <service> elements directly under <monit>, no wrapper element
+	Services []Service `xml:"service"`
 }
 
 // Server represents information about the Monit agent/daemon.
@@ -547,6 +547,12 @@ type ProgramInfo struct {
 // <uid>1000</uid>
 // <gid>1000</gid>
 // <size>12345</size>
+// <hardlink>1</hardlink>
+// <timestamps>
+//   <access>1763943569</access>
+//   <change>1763943568</change>
+//   <modify>1763943568</modify>
+// </timestamps>
 // <checksum type="MD5">abc123...</checksum>
 type FileInfo struct {
 	// Mode is the Unix file permissions (octal format)
@@ -563,16 +569,14 @@ type FileInfo struct {
 	// Size is the file size in bytes
 	Size int64 `xml:"size"`
 
-	// Checksum is the file's hash (MD5, SHA1, etc.)
-	// Used to detect if the file has changed
-	Checksum string `xml:"checksum"`
+	// Hardlink is the number of hard links to the file
+	Hardlink int `xml:"hardlink"`
 
-	// ChecksumType is the hash algorithm used (MD5, SHA1, SHA256, etc.)
-	// xml:"type,attr" means this is an attribute of the checksum element
-	// <checksum type="MD5">abc123</checksum>
-	//           ^^^^^^^^^^^^ this is ChecksumType
-	//                        ^^^^^^ this is Checksum
-	ChecksumType string `xml:"checksum>type,attr"`
+	// Timestamps contains access, change, and modify times
+	Timestamps FileTimestamps `xml:"timestamps"`
+
+	// Checksum contains the file checksum and its type
+	Checksum FileChecksum `xml:"checksum"`
 }
 
 // FilesystemInfo contains filesystem-specific information.
@@ -730,6 +734,27 @@ type NetworkCount struct {
 	Total int64 `xml:"total"`
 }
 
+// FileTimestamps contains file timestamp information.
+type FileTimestamps struct {
+	// Access is the last access time (Unix timestamp)
+	Access int64 `xml:"access"`
+
+	// Change is the last change time (Unix timestamp)
+	Change int64 `xml:"change"`
+
+	// Modify is the last modification time (Unix timestamp)
+	Modify int64 `xml:"modify"`
+}
+
+// FileChecksum contains checksum information for a monitored file.
+type FileChecksum struct {
+	// Type is the checksum algorithm (e.g., "MD5", "SHA1")
+	Type string `xml:"type,attr"`
+
+	// Value is the checksum hash value
+	Value string `xml:",chardata"`
+}
+
 // StatusMessage returns a human-readable status message based on the status code.
 // Monit uses numeric status codes that need to be translated for display.
 //
@@ -761,6 +786,196 @@ func (s *Service) StatusMessage() string {
 		return fmt.Sprintf("Unknown status (%d)", s.Status)
 	}
 }
+// ========================================================================
+// XML Proxy Structs - Mirror Monit's flat XML structure
+// ========================================================================
+
+// ServiceXML is a proxy struct that mirrors Monit's flat XML structure.
+// Monit sends fields like <uid>, <gid>, <mode> directly in <service>,
+// but different service types (file, filesystem, process) use the same
+// field names for different purposes. This proxy captures all flat fields,
+// then ToService() converts them to the correct nested structure based on Type.
+type ServiceXML struct {
+	// Common fields (all service types)
+	Type          int    `xml:"type"`          // Element: <type>5</type>
+	Name          string `xml:"name,attr"`     // Attribute: <service name="bigone">
+	CollectedSec  int64  `xml:"collected_sec"`
+	CollectedUsec int64  `xml:"collected_usec"`
+	Status        int    `xml:"status"`
+	StatusHint    int    `xml:"status_hint"`
+	Monitor       int    `xml:"monitor"`
+	MonitorMode   int    `xml:"monitormode"`
+	OnReboot      int    `xml:"onreboot"`
+	PendingAction int    `xml:"pendingaction"`
+
+	// Flat fields used by file (type 2), filesystem (type 0), and process (type 3)
+	// These conflict - same XML tags used for different purposes
+	Mode      *string `xml:"mode,omitempty"`       // File/filesystem mode
+	UID       *int    `xml:"uid,omitempty"`        // File/filesystem/process UID
+	GID       *int    `xml:"gid,omitempty"`        // File/filesystem/process GID
+	Size      *int64  `xml:"size,omitempty"`       // File size
+	Hardlink  *int    `xml:"hardlink,omitempty"`   // File hardlink count
+
+	// File-specific nested fields (checksum and timestamps need special handling)
+	Timestamps *FileTimestamps `xml:"timestamps,omitempty"` // File timestamps
+	Checksum   *FileChecksum   `xml:"checksum,omitempty"`   // File checksum
+
+	// Filesystem-specific fields
+	FSType   *string           `xml:"fstype,omitempty"`  // Filesystem type
+	FSFlags  *string           `xml:"fsflags,omitempty"` // Filesystem flags
+	Block    *FilesystemBlock  `xml:"block,omitempty"`   // Filesystem blocks
+	Inode    *FilesystemInode  `xml:"inode,omitempty"`   // Filesystem inodes
+	ReadIO   *FilesystemIO     `xml:"read,omitempty"`    // Filesystem read IO
+	WriteIO  *FilesystemIO     `xml:"write,omitempty"`   // Filesystem write IO
+
+	// Process-specific fields
+	PID      *int           `xml:"pid,omitempty"`
+	PPID     *int           `xml:"ppid,omitempty"`
+	EUID     *int           `xml:"euid,omitempty"`
+	Uptime   *int64         `xml:"uptime,omitempty"`
+	Boottime *int64         `xml:"boottime,omitempty"`
+	Threads  *int           `xml:"threads,omitempty"`
+	Children *int           `xml:"children,omitempty"`
+	Memory   *ProcessMemory `xml:"memory,omitempty"`
+	CPU      *ProcessCPU    `xml:"cpu,omitempty"`
+
+	// Nested fields (these don't conflict)
+	System  *SystemMetrics `xml:"system,omitempty"`
+	Program *ProgramInfo   `xml:"program,omitempty"`
+	Link    *NetworkLink   `xml:"link,omitempty"`
+}
+
+// ToService converts the flat ServiceXML to the domain Service struct.
+// It populates the correct nested structures based on the service Type.
+func (sx *ServiceXML) ToService() Service {
+	s := Service{
+		Type:          sx.Type,
+		Name:          sx.Name,
+		CollectedSec:  sx.CollectedSec,
+		CollectedUsec: sx.CollectedUsec,
+		Status:        sx.Status,
+		StatusHint:    sx.StatusHint,
+		Monitor:       sx.Monitor,
+		MonitorMode:   sx.MonitorMode,
+		OnReboot:      sx.OnReboot,
+		PendingAction: sx.PendingAction,
+		System:        sx.System,
+		Program:       sx.Program,
+		Link:          sx.Link,
+	}
+
+	switch sx.Type {
+	case 0: // Filesystem
+		s.FSType = sx.FSType
+		s.FSFlags = sx.FSFlags
+		s.FSMode = sx.Mode // Mode goes to FSMode for filesystem
+		s.Block = sx.Block
+		s.Inode = sx.Inode
+		s.ReadIO = sx.ReadIO
+		s.WriteIO = sx.WriteIO
+		// Note: filesystem also has uid/gid but they're not stored in domain model currently
+
+	case 2: // File
+		// Populate nested FileInfo struct from flat fields
+		if sx.Mode != nil || sx.UID != nil || sx.GID != nil || sx.Size != nil {
+			s.File = &FileInfo{
+				Mode:       getStringValue(sx.Mode),
+				UID:        getIntValue(sx.UID),
+				GID:        getIntValue(sx.GID),
+				Size:       getInt64Value(sx.Size),
+				Hardlink:   getIntValue(sx.Hardlink),
+				Timestamps: getFileTimestamps(sx.Timestamps),
+				Checksum:   getFileChecksum(sx.Checksum),
+			}
+		}
+
+	case 3: // Process
+		s.PID = sx.PID
+		s.PPID = sx.PPID
+		s.UID = sx.UID
+		s.EUID = sx.EUID
+		s.GID = sx.GID
+		s.Uptime = sx.Uptime
+		s.Boottime = sx.Boottime
+		s.Threads = sx.Threads
+		s.Children = sx.Children
+		s.Memory = sx.Memory
+		s.CPU = sx.CPU
+	}
+
+	return s
+}
+
+// Helper functions to safely dereference pointers
+func getStringValue(p *string) string {
+	if p != nil {
+		return *p
+	}
+	return ""
+}
+
+func getIntValue(p *int) int {
+	if p != nil {
+		return *p
+	}
+	return 0
+}
+
+func getInt64Value(p *int64) int64 {
+	if p != nil {
+		return *p
+	}
+	return 0
+}
+
+func getFileTimestamps(p *FileTimestamps) FileTimestamps {
+	if p != nil {
+		return *p
+	}
+	return FileTimestamps{}
+}
+
+func getFileChecksum(p *FileChecksum) FileChecksum {
+	if p != nil {
+		return *p
+	}
+	return FileChecksum{}
+}
+
+// MonitStatusXML is the XML proxy for the root monit element.
+// It uses ServiceXML instead of Service to handle the flat XML structure.
+//
+// The Monit collector API sends XML with attributes on the <monit> element:
+//   <monit id="..." incarnation="..." version="...">
+// while the HTTP API (?format=xml) sends them as nested elements in <server>.
+// We handle both formats by accepting them as optional attributes.
+type MonitStatusXML struct {
+	XMLName     xml.Name     `xml:"monit"`
+	ID          string       `xml:"id,attr,omitempty"`          // Optional: collector format
+	Incarnation string       `xml:"incarnation,attr,omitempty"` // Optional: collector format
+	Version     string       `xml:"version,attr,omitempty"`     // Optional: collector format
+	Server      Server       `xml:"server"`
+	Platform    Platform     `xml:"platform"`
+	ServicesWrapper struct {
+		Services []ServiceXML `xml:"service"`
+	} `xml:"services"`  // Monit sends services wrapped in <services> element
+}
+
+// ToMonitStatus converts MonitStatusXML to the domain MonitStatus struct.
+func (msx *MonitStatusXML) ToMonitStatus() *MonitStatus {
+	ms := &MonitStatus{
+		Server:   msx.Server,
+		Platform: msx.Platform,
+		Services: make([]Service, len(msx.ServicesWrapper.Services)),
+	}
+
+	for i, svcXML := range msx.ServicesWrapper.Services {
+		ms.Services[i] = svcXML.ToService()
+	}
+
+	return ms
+}
+
 
 // ParseMonitXML parses Monit XML status data into a MonitStatus struct.
 //
@@ -808,46 +1023,44 @@ func ParseMonitXML(data []byte) (*MonitStatus, error) {
 	//   - Returns: modified copy of data
 	//
 	// Note: This is safe because we're creating a copy, not modifying the original
+
+	// DEBUG: Log first 500 bytes of XML before processing
+	xmlPreview := string(data)
+	if len(xmlPreview) > 500 {
+		xmlPreview = xmlPreview[:500]
+	}
+	log.Printf("[DEBUG] Received XML (first 500 bytes): %s", xmlPreview)
+
+	// DEBUG: Save full XML to file for analysis
+	os.WriteFile("/tmp/cmonit-received-xml.xml", data, 0644)
+
 	data = bytes.ReplaceAll(data, []byte("ISO-8859-1"), []byte("UTF-8"))
 
 	// Alternative approach (if ReplaceAll doesn't work):
 	// We could also just remove the encoding declaration entirely:
 	// data = bytes.ReplaceAll(data, []byte(` encoding="ISO-8859-1"`), []byte(""))
 
-	// Create an empty MonitStatus struct to hold the parsed data
-	// var declares a variable with zero value (all fields empty/zero)
-	var status MonitStatus
+	// PHASE 1: Unmarshal to proxy struct (MonitStatusXML)
+	// This captures Monit's flat XML structure where fields like uid, gid, mode
+	// appear directly in <service> elements for all service types.
+	var statusXML MonitStatusXML
 
-	// xml.Unmarshal() parses XML and fills the struct
-	//
-	// Parameters:
-	//   - data: []byte containing the XML
-	//   - &status: pointer to the struct to fill (&= address of)
-	//
-	// Returns:
-	//   - error: nil if parsing succeeded, error if it failed
-	//
-	// Common errors:
-	//   - Invalid XML syntax (missing closing tags, etc.)
-	//   - XML structure doesn't match the struct
-	//   - Wrong data types (trying to parse "abc" as an integer)
-	//
-	// Note: xml.Unmarshal() ignores XML elements that don't have
-	// corresponding struct fields. This is useful because Monit's
-	// XML has many optional elements we might not need.
-	err := xml.Unmarshal(data, &status)
+	err := xml.Unmarshal(data, &statusXML)
 	if err != nil {
-		// Parsing failed
-		// Return nil for the status (no valid data) and the error
-		// fmt.Errorf() creates a formatted error message
-		// %w wraps the original error (preserves error chain)
 		return nil, fmt.Errorf("failed to unmarshal XML: %w", err)
 	}
 
-	// Parsing succeeded!
-	// Return the populated struct and nil (no error)
-	// &status returns a pointer to the struct
-	return &status, nil
+	// DEBUG: Log how many services were parsed
+	log.Printf("[DEBUG] Proxy unmarshal: parsed %d services from XML", len(statusXML.ServicesWrapper.Services))
+
+	// PHASE 2: Convert proxy to domain model (MonitStatus)
+	// ToMonitStatus() creates the proper nested structures (File, FileInfo, etc.)
+	// based on service Type field, resolving field conflicts.
+	status := statusXML.ToMonitStatus()
+
+	log.Printf("[DEBUG] After ToMonitStatus conversion: %d services", len(status.Services))
+
+	return status, nil
 }
 
 // GetCollectedTime converts the collected timestamp to a time.Time.

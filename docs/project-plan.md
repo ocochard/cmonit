@@ -511,6 +511,87 @@ Create a Go tool that simulates multiple Monit agents sending data:
 
 ---
 
+## Phase 5: Host Lifecycle Management
+
+**Goal**: Intelligent stale host detection and host deletion functionality for dynamic infrastructure
+
+### Features
+
+**1. Heartbeat-Based Health Status**
+- Store poll interval from Monit (typically 30s)
+- Three-state health indicator:
+  - 🟢 Green (Healthy): `last_seen < poll_interval * 2`
+  - 🟡 Yellow (Warning): `poll_interval * 2 <= last_seen < poll_interval * 5`
+  - 🔴 Red (Offline): `last_seen >= poll_interval * 5`
+- Visual status on dashboard with "last seen" timestamp
+- No false alarms during maintenance windows
+
+**2. Host Deletion with Safety**
+- Delete button for offline hosts (>1 hour)
+- Confirmation dialog requiring hostname entry
+- Shows deletion impact (services, metrics, events count)
+- Cascade deletion across all related tables
+- Safety: Cannot delete recently active hosts
+
+**3. Future Enhancements**
+- Soft delete/archive functionality (Phase 2)
+- Host lifecycle tags: production, ephemeral, testing, staging (Phase 2)
+- Auto-archive policies for ephemeral hosts (Phase 3)
+- Batch operations for multiple hosts (Phase 3)
+- Data export before deletion (Phase 3)
+
+### Database Schema Changes (Schema v5)
+
+```sql
+ALTER TABLE hosts ADD COLUMN poll_interval INTEGER DEFAULT 30;
+```
+
+**Future schema additions** (Phase 2+):
+```sql
+ALTER TABLE hosts ADD COLUMN archived INTEGER DEFAULT 0;
+ALTER TABLE hosts ADD COLUMN archived_at DATETIME;
+ALTER TABLE hosts ADD COLUMN lifecycle TEXT DEFAULT 'production';
+```
+
+### Implementation Phases
+
+**Phase 1 (Essential) - Status Tracking:**
+- [ ] Store poll_interval in database
+- [ ] Add schema v5 migration
+- [ ] Implement health status calculation helper
+- [ ] Add health indicator to dashboard (🟢🟡🔴)
+- [ ] Show "last seen" with human-readable time
+- [ ] Add DELETE /admin/hosts/:id API endpoint
+- [ ] Add cascade deletion function
+- [ ] Add delete confirmation UI with hostname verification
+
+**Phase 2 (Enhanced) - Archive System:**
+- [ ] Add archived flag and timestamps
+- [ ] Implement archive/restore functionality
+- [ ] Show deletion impact statistics
+- [ ] Add "Archived Hosts" page
+- [ ] Host lifecycle tags
+
+**Phase 3 (Advanced) - Automation:**
+- [ ] Auto-archive policies based on lifecycle
+- [ ] Batch operations (archive/delete multiple)
+- [ ] Data export before deletion
+- [ ] Email notifications before auto-archive
+
+### Acceptance Tests
+
+Phase 1:
+- [ ] Poll interval correctly stored from XML
+- [ ] Health status calculates correctly (green/yellow/red)
+- [ ] Dashboard shows visual health indicators
+- [ ] Cannot delete host active within last hour
+- [ ] Delete requires correct hostname confirmation
+- [ ] Deletion cascades to all related tables
+- [ ] Metrics/events/services deleted with host
+- [ ] Database integrity maintained after deletion
+
+---
+
 ## Future Enhancements
 
 - Prometheus exporter

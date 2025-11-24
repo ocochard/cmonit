@@ -39,7 +39,7 @@ import (
 
 // currentSchemaVersion is the current database schema version.
 // Increment this when making schema changes that require migration.
-const currentSchemaVersion = 6
+const currentSchemaVersion = 7
 
 // SQL schema for the cmonit database
 //
@@ -100,6 +100,7 @@ const (
 	//   - system_uptime: System uptime in seconds
 	//   - boottime: Unix timestamp of last boot
 	//   - monit_uptime: Monit daemon uptime in seconds (for restart detection)
+	//   - poll_interval: Monit's check interval in seconds (for heartbeat health status)
 	//   - last_seen: When we last received data from this host
 	//   - created_at: When we first saw this host
 	//
@@ -958,6 +959,23 @@ func migrateSchema(db *sql.DB, fromVersion, toVersion int) error {
 				return err
 			}
 			log.Printf("[INFO] Successfully migrated to schema version 6")
+
+		case 6:
+			// Migration from version 6 to version 7
+			// Add poll_interval column to hosts table for heartbeat-based health status
+			log.Printf("[INFO] Migrating from v6 to v7: Adding poll_interval column to hosts table")
+
+			_, err := db.Exec("ALTER TABLE hosts ADD COLUMN poll_interval INTEGER DEFAULT 30")
+			if err != nil {
+				return fmt.Errorf("migration v6->v7 failed: %w", err)
+			}
+
+			fromVersion = 7
+			err = setSchemaVersion(db, fromVersion)
+			if err != nil {
+				return err
+			}
+			log.Printf("[INFO] Successfully migrated to schema version 7")
 
 		default:
 			return fmt.Errorf("no migration path from version %d", fromVersion)

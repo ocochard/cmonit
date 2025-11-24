@@ -13,6 +13,8 @@ import (
 	"net/http"      // HTTP server
 	"strings"       // String manipulation
 	"time"          // Time handling
+
+	dbpkg "github.com/ocochard/cmonit/internal/db" // Database functions
 )
 
 // =============================================================================
@@ -313,15 +315,29 @@ func HandleMMEventsGet(w http.ResponseWriter, r *http.Request) {
 //
 // GET /admin/hosts - List all hosts
 // POST /admin/hosts - Add a new host (not implemented in collector mode)
-// DELETE /admin/hosts/{id} - Remove a host (not implemented in collector mode)
+// DELETE /admin/hosts/{id} - Remove a host and all associated data
 func HandleMMAdminHosts(w http.ResponseWriter, r *http.Request) {
+	// Extract path after /admin/hosts
+	path := strings.TrimPrefix(r.URL.Path, "/admin/hosts")
+	path = strings.TrimPrefix(path, "/")
+
+	// If there's a host ID in the path, handle specific host operations
+	if path != "" {
+		hostID := strings.Split(path, "/")[0]
+		if r.Method == http.MethodDelete {
+			handleMMAdminHostDelete(w, r, hostID)
+			return
+		}
+		respondMMError(w, "Method not allowed for specific host", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// No host ID - handle collection operations
 	switch r.Method {
 	case http.MethodGet:
 		handleMMAdminHostsList(w, r)
 	case http.MethodPost:
 		respondMMError(w, "Adding hosts manually not supported in collector mode", http.StatusNotImplemented)
-	case http.MethodDelete:
-		respondMMError(w, "Deleting hosts not supported in collector mode", http.StatusNotImplemented)
 	default:
 		respondMMError(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -342,6 +358,65 @@ func handleMMAdminHostsList(w http.ResponseWriter, r *http.Request) {
 		Records: len(hosts),
 		Hosts:   hosts,
 	}
+
+	respondJSON(w, response, http.StatusOK)
+}
+
+// handleMMAdminHostDelete deletes a host and all its associated data.
+//
+// DELETE /admin/hosts/{id}
+//
+// This performs cascade deletion across all related tables:
+// - services
+// - metrics
+// - filesystem_metrics
+// - network_metrics
+// - file_metrics
+// - program_metrics
+// - events
+//
+// Safety: Host must have been offline for more than 1 hour.
+func handleMMAdminHostDelete(w http.ResponseWriter, r *http.Request, hostID string) {
+	log.Printf("[INFO] DELETE request for host: %s", hostID)
+
+	// Call the DeleteHost function from the db package
+	// dbpkg is the imported db package, db is the *sql.DB connection
+	stats, err := dbpkg.DeleteHost(db, hostID)
+	if err != nil {
+		// Check specific error types
+		if strings.Contains(err.Error(), "host not found") {
+			respondMMError(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		if strings.Contains(err.Error(), "cannot delete host") {
+			// This is the safety check - host was active too recently
+			respondMMError(w, err.Error(), http.StatusForbidden)
+			return
+		}
+		// Other errors
+		log.Printf("[ERROR] Failed to delete host %s: %v", hostID, err)
+		respondMMError(w, "Failed to delete host", http.StatusInternalServerError)
+		return
+	}
+
+	// Build response with deletion statistics
+	response := map[string]interface{}{
+		"success": true,
+		"message": "Host and all associated data deleted successfully",
+		"hostid":  hostID,
+		"deleted": map[string]int64{
+			"services":            stats.Services,
+			"metrics":             stats.Metrics,
+			"filesystem_metrics":  stats.FilesystemMetrics,
+			"network_metrics":     stats.NetworkMetrics,
+			"file_metrics":        stats.FileMetrics,
+			"program_metrics":     stats.ProgramMetrics,
+			"events":              stats.Events,
+		},
+	}
+
+	log.Printf("[INFO] Successfully deleted host %s: %d services, %d metrics, %d events",
+		hostID, stats.Services, stats.Metrics, stats.Events)
 
 	respondJSON(w, response, http.StatusOK)
 }

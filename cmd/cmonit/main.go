@@ -343,6 +343,7 @@ func main() {
 
 	// Admin API - host administration
 	webMux.HandleFunc("/admin/hosts", web.HandleMMAdminHosts)
+	webMux.HandleFunc("/admin/hosts/", web.HandleMMAdminHosts)
 
 	// Start the collector HTTP server in a goroutine (lightweight thread)
 	//

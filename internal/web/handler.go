@@ -47,7 +47,12 @@ type HostWithServices struct {
 	Boottime      *int64    // Unix timestamp of last boot
 	LastSeen      time.Time // Last successful update
 	Services      []Service // All services on this host
-	IsStale       bool      // True if not seen in 5+ minutes
+	IsStale       bool      // True if not seen in 5+ minutes (deprecated, use HealthStatus)
+	PollInterval  int       // Monit poll interval in seconds
+	HealthStatus  string    // Host health status: "green", "yellow", "red"
+	HealthEmoji   string    // Health status emoji: 🟢, 🟡, 🔴
+	HealthLabel   string    // Health status label: "Healthy", "Warning", "Offline"
+	LastSeenText  string    // Human-readable "last seen" text (e.g., "5 minutes ago")
 }
 
 // Service represents a monitored service.

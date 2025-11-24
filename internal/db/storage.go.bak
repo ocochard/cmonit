@@ -115,11 +115,9 @@ func StoreHost(db *sql.DB, server *parser.Server, platform *parser.Platform, sys
 			system_uptime,
 			boottime,
 			monit_uptime,
-			poll_interval,
 			last_seen,
 			created_at
 		) VALUES (
-			?,
 			?,
 			?,
 			?,
@@ -204,7 +202,6 @@ func StoreHost(db *sql.DB, server *parser.Server, platform *parser.Platform, sys
 		systemUptime,
 		boottime,
 		server.Uptime,
-		server.Poll,
 		now,
 		hostID,
 		now,
@@ -247,9 +244,7 @@ func StoreHost(db *sql.DB, server *parser.Server, platform *parser.Platform, sys
 
 	// Success!
 	// Log for debugging (helps track what's happening)
-	if debugMode {
-		log.Printf("[DEBUG] Stored host: %s (ID: %s, Monit uptime: %d)", server.LocalHostname, hostID, server.Uptime)
-	}
+	log.Printf("[DEBUG] Stored host: %s (ID: %s, Monit uptime: %d)", server.LocalHostname, hostID, server.Uptime)
 
 	// Return nil (no error)
 	return nil
@@ -383,10 +378,8 @@ func StoreService(db *sql.DB, hostID string, service *parser.Service) error {
 		return fmt.Errorf("failed to store service: %w", err)
 	}
 
-	if debugMode {
-		log.Printf("[DEBUG] Stored service: %s/%s (type %d, status %d)",
-			hostID, service.Name, service.Type, service.Status)
-	}
+	log.Printf("[DEBUG] Stored service: %s/%s (type %d, status %d)",
+		hostID, service.Name, service.Type, service.Status)
 
 	return nil
 }
@@ -570,9 +563,7 @@ func StoreSystemMetrics(db *sql.DB, hostID string, service *parser.Service) erro
 	}
 
 	// All metrics stored successfully!
-	if debugMode {
-		log.Printf("[DEBUG] Stored %d system metrics for %s/%s", 12, hostID, service.Name)
-	}
+	log.Printf("[DEBUG] Stored %d system metrics for %s/%s", 12, hostID, service.Name)
 	return nil
 }
 
@@ -652,9 +643,7 @@ func StoreProcessMetrics(db *sql.DB, hostID string, service *parser.Service) err
 		}
 	}
 
-	if debugMode {
-		log.Printf("[DEBUG] Stored process metrics for %s/%s", hostID, service.Name)
-	}
+	log.Printf("[DEBUG] Stored process metrics for %s/%s", hostID, service.Name)
 	return nil
 }
 
@@ -710,11 +699,6 @@ func StoreMonitStatus(db *sql.DB, status *parser.MonitStatus) error {
 	// For each service:
 	// - Store service status in services table
 	// - Extract and store metrics in metrics table
-
-	// Capture current timestamp before storing services
-	// We'll use this to identify stale services after the update
-	updateTime := time.Now()
-
 	for i := range status.Services {
 		service := &status.Services[i]
 
@@ -741,51 +725,11 @@ func StoreMonitStatus(db *sql.DB, status *parser.MonitStatus) error {
 				log.Printf("[WARN] Failed to store process metrics for %s: %v", service.Name, err)
 			}
 
-		case 0: // Filesystem service
-			err = StoreFilesystemMetrics(db, hostID, service)
-			if err != nil {
-				log.Printf("[WARN] Failed to store filesystem metrics for %s: %v", service.Name, err)
-			}
-
-		case 2: // File service
-			err = StoreFileMetrics(db, hostID, service)
-			if err != nil {
-				log.Printf("[WARN] Failed to store file metrics for %s: %v", service.Name, err)
-			}
-
-		case 7: // Program service
-			err = StoreProgramMetrics(db, hostID, service)
-			if err != nil {
-				log.Printf("[WARN] Failed to store program metrics for %s: %v", service.Name, err)
-			}
-
-		case 8: // Network interface service
-			err = StoreNetworkMetrics(db, hostID, service)
-			if err != nil {
-				log.Printf("[WARN] Failed to store network metrics for %s: %v", service.Name, err)
-			}
-		}
-	}
-
-	// Step 4: Clean up stale services
-	//
-	// Any service for this host that wasn't in the current status report
-	// will have an old last_seen timestamp. Delete these stale services.
-	// This handles cases where:
-	// - A service was removed from Monit configuration
-	// - A service was renamed
-	// - A monitored process/filesystem was removed
-	result, err := db.Exec(`
-		DELETE FROM services
-		WHERE host_id = ? AND last_seen < ?
-	`, hostID, updateTime)
-
-	if err != nil {
-		log.Printf("[WARN] Failed to clean up stale services for %s: %v", hostID, err)
-	} else {
-		rowsAffected, _ := result.RowsAffected()
-		if rowsAffected > 0 {
-			log.Printf("[INFO] Removed %d stale service(s) for host %s", rowsAffected, status.Server.LocalHostname)
+		// TODO: Add handlers for other service types:
+		// case 0: // Filesystem
+		// case 2: // File
+		// case 7: // Program
+		// etc.
 		}
 	}
 
@@ -794,469 +738,4 @@ func StoreMonitStatus(db *sql.DB, status *parser.MonitStatus) error {
 		status.Server.LocalHostname, len(status.Services))
 
 	return nil
-}
-
-// StoreFilesystemMetrics stores filesystem service metrics into the database.
-//
-// This function is called for filesystem services (type 0) to record:
-// - Disk space usage (percent, MB used, MB total)
-// - Inode usage (percent, used, total)
-// - I/O statistics (read/write bytes and operations)
-// - Filesystem metadata (type, flags, permissions)
-//
-// Parameters:
-//   - db: Database connection
-//   - hostID: Host identifier (from hosts table)
-//   - service: Parsed service data from Monit XML
-//
-// Returns:
-//   - error: nil if successful, error describing problem if failed
-func StoreFilesystemMetrics(db *sql.DB, hostID string, service *parser.Service) error {
-	// Check if this is actually a filesystem service
-	if service.Type != 0 {
-		// Not a filesystem service, nothing to do
-		return nil
-	}
-
-	// Check if filesystem metrics are present
-	// At least one of the key filesystem fields should be non-nil
-	if service.Block == nil {
-		// No filesystem metrics in this service (shouldn't happen for type 0, but be safe)
-		return nil
-	}
-
-	// Get the collection timestamp
-	collectedAt := service.GetCollectedTime()
-
-	// Helper function to safely get string value
-	getString := func(s *string) string {
-		if s != nil {
-			return *s
-		}
-		return ""
-	}
-
-	// Helper function to safely get int64 value
-	getInt64 := func(i *int64) int64 {
-		if i != nil {
-			return *i
-		}
-		return 0
-	}
-
-	// Insert filesystem metrics into the database
-	//
-	// Using INSERT OR REPLACE means:
-	// - If this is the first metrics for this filesystem: insert new row
-	// - If we already have metrics: this will just insert a new row (time-series data)
-	//
-	// We store all filesystem data in one row for efficient querying
-	query := `
-		INSERT INTO filesystem_metrics (
-			host_id, service_name, fs_type, fs_flags, mode, uid, gid,
-			block_percent, block_usage_mb, block_total_mb,
-			inode_percent, inode_usage, inode_total,
-			read_bytes_total, read_ops_total,
-			write_bytes_total, write_ops_total,
-			collected_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`
-
-	// Get UID and GID from the service fields (these might be used for file system too)
-	var uid, gid int
-	if service.UID != nil {
-		uid = *service.UID
-	}
-	if service.GID != nil {
-		gid = *service.GID
-	}
-
-	_, err := db.Exec(query,
-		hostID,
-		service.Name,
-		getString(service.FSType),
-		getString(service.FSFlags),
-		getString(service.FSMode),
-		uid,
-		gid,
-		service.Block.Percent,
-		service.Block.Usage,
-		service.Block.Total,
-		service.Inode.Percent,
-		service.Inode.Usage,
-		service.Inode.Total,
-		getInt64(&service.ReadIO.Bytes.Total),
-		getInt64(&service.ReadIO.Operations.Total),
-		getInt64(&service.WriteIO.Bytes.Total),
-		getInt64(&service.WriteIO.Operations.Total),
-		collectedAt,
-	)
-
-	if err != nil {
-		return fmt.Errorf("failed to store filesystem metrics: %w", err)
-	}
-
-	if debugMode {
-		log.Printf("[DEBUG] Stored filesystem metrics for %s/%s (%.1f%% used, %s)",
-			hostID, service.Name, service.Block.Percent, getString(service.FSType))
-	}
-
-	return nil
-}
-
-// StoreNetworkMetrics stores network interface service metrics into the database.
-//
-// This function is called for network interface services (type 8) to record:
-// - Link state (up/down)
-// - Link speed (bits per second) and duplex mode
-// - Download traffic (packets, bytes, errors - current and total)
-// - Upload traffic (packets, bytes, errors - current and total)
-//
-// Parameters:
-//   - db: Database connection
-//   - hostID: Host identifier (from hosts table)
-//   - service: Parsed service data from Monit XML
-//
-// Returns:
-//   - error: nil if successful, error describing problem if failed
-func StoreNetworkMetrics(db *sql.DB, hostID string, service *parser.Service) error {
-	// Check if this is actually a network interface service
-	if service.Type != 8 {
-		// Not a network interface service, nothing to do
-		return nil
-	}
-
-	// Check if network link metrics are present
-	if service.Link == nil {
-		// No network metrics in this service (shouldn't happen for type 8, but be safe)
-		return nil
-	}
-
-	// Get the collection timestamp
-	collectedAt := service.GetCollectedTime()
-
-	// Insert network metrics into the database
-	//
-	// Using INSERT (not INSERT OR REPLACE) because:
-	// - Each metric is a new data point in time
-	// - We want to keep all historical values for graphing
-	// - Time-series data is append-only
-	query := `
-		INSERT INTO network_metrics (
-			host_id, service_name,
-			link_state, link_speed, link_duplex,
-			download_packets_now, download_packets_total,
-			download_bytes_now, download_bytes_total,
-			download_errors_now, download_errors_total,
-			upload_packets_now, upload_packets_total,
-			upload_bytes_now, upload_bytes_total,
-			upload_errors_now, upload_errors_total,
-			collected_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`
-
-	_, err := db.Exec(query,
-		hostID,
-		service.Name,
-		service.Link.State,
-		service.Link.Speed,
-		service.Link.Duplex,
-		service.Link.Download.Packets.Now,
-		service.Link.Download.Packets.Total,
-		service.Link.Download.Bytes.Now,
-		service.Link.Download.Bytes.Total,
-		service.Link.Download.Errors.Now,
-		service.Link.Download.Errors.Total,
-		service.Link.Upload.Packets.Now,
-		service.Link.Upload.Packets.Total,
-		service.Link.Upload.Bytes.Now,
-		service.Link.Upload.Bytes.Total,
-		service.Link.Upload.Errors.Now,
-		service.Link.Upload.Errors.Total,
-		collectedAt,
-	)
-
-	if err != nil {
-		return fmt.Errorf("failed to store network metrics: %w", err)
-	}
-
-	if debugMode {
-		// Convert speed from bits/sec to Mbps for display
-		speedMbps := float64(service.Link.Speed) / 1000000
-		duplexStr := "half-duplex"
-		if service.Link.Duplex == 1 {
-			duplexStr = "full-duplex"
-		}
-		log.Printf("[DEBUG] Stored network metrics for %s/%s (%.0f Mbps %s, link %s)",
-			hostID, service.Name, speedMbps, duplexStr,
-			map[int]string{0: "down", 1: "up"}[service.Link.State])
-	}
-
-	return nil
-}
-
-// StoreFileMetrics stores file service metrics into the database.
-//
-// This function captures file-specific monitoring data including:
-// - File permissions (mode)
-// - Owner/group (UID/GID)
-// - File size
-// - Hard link count
-// - Timestamps (access, change, modify)
-// - Checksum and checksum type
-//
-// Parameters:
-//   - db: Database connection
-//   - hostID: Host identifier (from hosts table)
-//   - service: Parsed service data from Monit XML
-//
-// Returns:
-//   - error: nil if successful, error describing problem if failed
-func StoreFileMetrics(db *sql.DB, hostID string, service *parser.Service) error {
-	// Check if this is actually a file service
-	if service.Type != 2 {
-		// Not a file service, nothing to do
-		return nil
-	}
-
-	// Check if file info is present
-	if service.File == nil {
-		// No file metrics in this service (shouldn't happen for type 2, but be safe)
-		return nil
-	}
-
-	// Get the collection timestamp
-	collectedAt := service.GetCollectedTime()
-
-	// Insert file metrics into the database
-	query := `
-		INSERT INTO file_metrics (
-			host_id, service_name,
-			mode, uid, gid,
-			size, hardlink,
-			access_time, change_time, modify_time,
-			checksum_type, checksum_value,
-			collected_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`
-
-	_, err := db.Exec(query,
-		hostID,
-		service.Name,
-		service.File.Mode,
-		service.File.UID,
-		service.File.GID,
-		service.File.Size,
-		service.File.Hardlink,
-		service.File.Timestamps.Access,
-		service.File.Timestamps.Change,
-		service.File.Timestamps.Modify,
-		service.File.Checksum.Type,
-		service.File.Checksum.Value,
-		collectedAt,
-	)
-
-	if err != nil {
-		return fmt.Errorf("failed to store file metrics: %w", err)
-	}
-
-	if debugMode {
-		log.Printf("[DEBUG] Stored file metrics for %s/%s (mode: %s, size: %d bytes, checksum: %s)",
-			hostID, service.Name, service.File.Mode, service.File.Size, service.File.Checksum.Type)
-	}
-
-	return nil
-}
-
-// StoreProgramMetrics stores program service metrics into the database.
-//
-// This function captures program status check data including:
-// - Program start time
-// - Exit status code
-// - Program output (stdout/stderr)
-//
-// Parameters:
-//   - db: Database connection
-//   - hostID: Host identifier (from hosts table)
-//   - service: Parsed service data from Monit XML
-//
-// Returns:
-//   - error: nil if successful, error describing problem if failed
-func StoreProgramMetrics(db *sql.DB, hostID string, service *parser.Service) error {
-	// Check if this is actually a program service
-	if service.Type != 7 {
-		// Not a program service, nothing to do
-		return nil
-	}
-
-	// Check if program info is present
-	if service.Program == nil {
-		// No program metrics in this service (shouldn't happen for type 7, but be safe)
-		return nil
-	}
-
-	// Get the collection timestamp
-	collectedAt := service.GetCollectedTime()
-
-	// Insert program metrics into the database
-	query := `
-		INSERT INTO program_metrics (
-			host_id, service_name,
-			started, exit_status, output,
-			collected_at
-		) VALUES (?, ?, ?, ?, ?, ?)
-	`
-
-	_, err := db.Exec(query,
-		hostID,
-		service.Name,
-		service.Program.Started,
-		service.Program.Status,
-		service.Program.Output,
-		collectedAt,
-	)
-
-	if err != nil {
-		return fmt.Errorf("failed to store program metrics: %w", err)
-	}
-
-	if debugMode {
-		log.Printf("[DEBUG] Stored program metrics for %s/%s (exit status: %d, started: %d)",
-			hostID, service.Name, service.Program.Status, service.Program.Started)
-	}
-
-	return nil
-}
-
-// DeleteHostStats contains statistics about what was deleted during host deletion
-type DeleteHostStats struct {
-	Services           int64 // Number of services deleted
-	Metrics            int64 // Number of metrics records deleted
-	FilesystemMetrics  int64 // Number of filesystem metrics deleted
-	NetworkMetrics     int64 // Number of network metrics deleted
-	FileMetrics        int64 // Number of file metrics deleted
-	ProgramMetrics     int64 // Number of program metrics deleted
-	Events             int64 // Number of events deleted
-}
-
-// DeleteHost removes a host and all associated data from the database.
-//
-// This function performs a cascade deletion across all related tables:
-// - services
-// - metrics
-// - filesystem_metrics
-// - network_metrics
-// - file_metrics
-// - program_metrics
-// - events
-// - hosts
-//
-// For safety, this function will only delete hosts that have been offline
-// for more than 1 hour (last_seen >= 3600 seconds ago).
-//
-// Parameters:
-//   - db: Database connection (from InitDB)
-//   - hostID: Host identifier to delete
-//
-// Returns:
-//   - *DeleteHostStats: Statistics about deleted records
-//   - error: nil if successful, error describing problem if failed
-func DeleteHost(db *sql.DB, hostID string) (*DeleteHostStats, error) {
-	stats := &DeleteHostStats{}
-
-	// First, check if the host exists and get its last_seen
-	// Note: last_seen is stored as DATETIME, so we convert it to Unix timestamp
-	var lastSeen int64
-	err := db.QueryRow("SELECT strftime('%s', last_seen) FROM hosts WHERE id = ?", hostID).Scan(&lastSeen)
-	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("host not found: %s", hostID)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("failed to query host: %w", err)
-	}
-
-	// Safety check: only allow deletion if host has been offline for > 1 hour
-	now := time.Now().Unix()
-	secondsSince := now - lastSeen
-	oneHour := int64(3600)
-
-	if secondsSince < oneHour {
-		return nil, fmt.Errorf("cannot delete host: host was last seen %d seconds ago (must be offline for > 1 hour)", secondsSince)
-	}
-
-	// Begin transaction for atomicity
-	tx, err := db.Begin()
-	if err != nil {
-		return nil, fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback() // Will be no-op if tx.Commit() succeeds
-
-	// Delete services
-	result, err := tx.Exec("DELETE FROM services WHERE host_id = ?", hostID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to delete services: %w", err)
-	}
-	stats.Services, _ = result.RowsAffected()
-
-	// Delete metrics
-	result, err = tx.Exec("DELETE FROM metrics WHERE host_id = ?", hostID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to delete metrics: %w", err)
-	}
-	stats.Metrics, _ = result.RowsAffected()
-
-	// Delete filesystem_metrics
-	result, err = tx.Exec("DELETE FROM filesystem_metrics WHERE host_id = ?", hostID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to delete filesystem_metrics: %w", err)
-	}
-	stats.FilesystemMetrics, _ = result.RowsAffected()
-
-	// Delete network_metrics
-	result, err = tx.Exec("DELETE FROM network_metrics WHERE host_id = ?", hostID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to delete network_metrics: %w", err)
-	}
-	stats.NetworkMetrics, _ = result.RowsAffected()
-
-	// Delete file_metrics
-	result, err = tx.Exec("DELETE FROM file_metrics WHERE host_id = ?", hostID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to delete file_metrics: %w", err)
-	}
-	stats.FileMetrics, _ = result.RowsAffected()
-
-	// Delete program_metrics
-	result, err = tx.Exec("DELETE FROM program_metrics WHERE host_id = ?", hostID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to delete program_metrics: %w", err)
-	}
-	stats.ProgramMetrics, _ = result.RowsAffected()
-
-	// Delete events
-	result, err = tx.Exec("DELETE FROM events WHERE host_id = ?", hostID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to delete events: %w", err)
-	}
-	stats.Events, _ = result.RowsAffected()
-
-	// Finally, delete the host itself
-	result, err = tx.Exec("DELETE FROM hosts WHERE id = ?", hostID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to delete host: %w", err)
-	}
-	rowsAffected, _ := result.RowsAffected()
-	if rowsAffected == 0 {
-		return nil, fmt.Errorf("host not found during deletion: %s", hostID)
-	}
-
-	// Commit the transaction
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("failed to commit transaction: %w", err)
-	}
-
-	log.Printf("[INFO] Deleted host %s and all associated data (services: %d, metrics: %d, events: %d)",
-		hostID, stats.Services, stats.Metrics, stats.Events)
-
-	return stats, nil
 }

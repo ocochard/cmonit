@@ -163,7 +163,7 @@ func getStatusData() (*StatusData, error) {
 func getHostDetailData(hostID string) (*DashboardData, error) {
 	const hostQuery = `
 		SELECT id, hostname, version, os_name, os_release, machine,
-		       cpu_count, total_memory, total_swap, system_uptime, boottime, last_seen
+		       cpu_count, total_memory, total_swap, system_uptime, boottime, last_seen, poll_interval
 		FROM hosts
 		WHERE id = ?
 	`
@@ -183,11 +183,21 @@ func getHostDetailData(hostID string) (*DashboardData, error) {
 		&host.SystemUptime,
 		&host.Boottime,
 		&host.LastSeen,
+		&host.PollInterval,
 	)
 	if err != nil {
 		return nil, err
 	}
 
+	// Calculate health status based on last_seen and poll_interval
+	lastSeenUnix := host.LastSeen.Unix()
+	healthStatus, _ := CalculateHostHealth(lastSeenUnix, host.PollInterval)
+	host.HealthStatus = string(healthStatus)
+	host.HealthEmoji = GetHealthEmoji(healthStatus)
+	host.HealthLabel = GetHealthLabel(healthStatus)
+	host.LastSeenText = FormatTimeSince(lastSeenUnix)
+
+	// Keep IsStale for backward compatibility (deprecated)
 	host.IsStale = time.Since(host.LastSeen) > 5*time.Minute
 
 	host.Services, err = getServicesForHost(host.ID)

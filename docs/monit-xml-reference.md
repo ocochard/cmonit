@@ -4,9 +4,9 @@ This document provides a complete reference of all XML fields that Monit sends t
 
 ## Document Status
 
-- **Last Updated**: 2025-11-23
+- **Last Updated**: 2025-11-24
 - **Monit Version**: 5.35.2
-- **cmonit Schema Version**: 2
+- **cmonit Schema Version**: 4
 
 ## Overview
 
@@ -25,12 +25,18 @@ Monit sends status updates via HTTP POST to the `/collector` endpoint in XML for
 ## XML Structure
 
 ```xml
-<monit>
+<monit id="..." incarnation="..." version="...">
   <server>...</server>
   <platform>...</platform>
-  <service>...</service>  <!-- Multiple services -->
+  <services>
+    <service name="...">...</service>  <!-- Multiple services wrapped in <services> -->
+    <service name="...">...</service>
+  </services>
+  <servicegroups>...</servicegroups>
 </monit>
 ```
+
+**Important**: Monit 5.35.2 wraps services in a `<services>` container element, with `name` as an attribute and `type` as a child element. The parser was fixed (2025-11-24) to handle this structure correctly.
 
 ---
 
@@ -301,36 +307,38 @@ Fields specific to file monitoring.
 
 | Field | Status | Type | Description | Storage |
 |-------|--------|------|-------------|---------|
-| `mode` | ⚠️ PARSED | string | Unix permissions (octal, e.g., "644") | Not stored |
-| `uid` | ⚠️ PARSED | int | File owner user ID | Not stored |
-| `gid` | ⚠️ PARSED | int | File owner group ID | Not stored |
-| `size` | ⚠️ PARSED | int64 | File size in bytes | Not stored |
-| `hardlink` | ❌ UNUSED | int | Number of hard links to file | - |
+| `mode` | ✅ USED | string | Unix permissions (octal, e.g., "644") | `file_metrics.mode` |
+| `uid` | ✅ USED | int | File owner user ID | `file_metrics.uid` |
+| `gid` | ✅ USED | int | File owner group ID | `file_metrics.gid` |
+| `size` | ✅ USED | int64 | File size in bytes | `file_metrics.size` |
+| `hardlink` | ✅ USED | int | Number of hard links to file | `file_metrics.hardlink` |
 
 ### File Timestamps (`<timestamps>`)
 
 | Field | Status | Type | Description | Storage |
 |-------|--------|------|-------------|---------|
-| `access` | ❌ UNUSED | int64 | Last access time (Unix timestamp) | - |
-| `change` | ❌ UNUSED | int64 | Last status change time | - |
-| `modify` | ❌ UNUSED | int64 | Last modification time | - |
+| `access` | ✅ USED | int64 | Last access time (Unix timestamp) | `file_metrics.access_time` |
+| `change` | ✅ USED | int64 | Last status change time | `file_metrics.change_time` |
+| `modify` | ✅ USED | int64 | Last modification time | `file_metrics.modify_time` |
 
 ### File Checksum (`<checksum>`)
 
 | Field | Status | Type | Description | Storage |
 |-------|--------|------|-------------|---------|
-| `checksum` | ⚠️ PARSED | string | File hash value | Not stored |
-| `checksum type` (attr) | ⚠️ PARSED | string | Hash algorithm (MD5, SHA1, SHA256) | Not stored |
+| `checksum` | ✅ USED | string | File hash value | `file_metrics.checksum_value` |
+| `checksum type` (attr) | ✅ USED | string | Hash algorithm (MD5, SHA1, SHA256) | `file_metrics.checksum_type` |
 
-### Unused File Fields
+### File Metrics Usage
 
-Potential use cases:
+File monitoring is now fully implemented (Schema v4, 2025-11-24):
 
-- **File integrity monitoring**: Store checksums and alert on changes
-- **Timestamp tracking**: Monitor when files were last accessed or modified
-- **Permission monitoring**: Alert on permission changes
-- **Size tracking**: Graph file growth over time
-- **Hard link detection**: Identify files with multiple hard links
+- **File integrity monitoring**: All file metadata and checksums stored in dedicated `file_metrics` table
+- **Timestamp tracking**: Access, modify, and change times stored for all monitored files
+- **Permission monitoring**: Unix permissions (mode) and ownership (uid/gid) tracked
+- **Size tracking**: File size stored in bytes for trend analysis
+- **Hard link detection**: Hard link count stored to identify files with multiple links
+
+**Example**: File service "metatron" shows mode 644, size 1998 bytes, MD5 checksum d756761bf145910c0890b6f5db366ada
 
 ---
 
@@ -340,18 +348,20 @@ Fields for program/script execution checks.
 
 | Field | Status | Type | Description | Storage |
 |-------|--------|------|-------------|---------|
-| `program.started` | ⚠️ PARSED | int64 | When program was last executed | Not stored |
-| `program.status` | ⚠️ PARSED | int | Exit code (0=success) | Not stored |
-| `program.output` | ⚠️ PARSED | string | Program output (stdout) | Not stored |
+| `program.started` | ✅ USED | int64 | When program was last executed | `program_metrics.started` |
+| `program.status` | ✅ USED | int | Exit code (0=success) | `program_metrics.exit_status` |
+| `program.output` | ✅ USED | string | Program output (stdout) | `program_metrics.output` |
 
-### Unused Program Fields
+### Program Metrics Usage
 
-Potential use cases:
+Program monitoring is now fully implemented (Schema v4, 2025-11-24):
 
-- **Exit code tracking**: Store exit codes for trend analysis
-- **Output logging**: Keep history of script outputs
-- **Execution frequency**: Show when checks were last run
-- **Alerting**: Trigger alerts based on specific exit codes or output patterns
+- **Exit code tracking**: Exit status stored for trend analysis and alerting
+- **Output logging**: Full program output (stdout) stored for debugging
+- **Execution frequency**: Timestamp of last program execution tracked
+- **Alerting**: Enable alerts based on specific exit codes or output patterns
+
+**Example**: Program service "temperature" shows exit status 0 with output "Temperature: 52.0°C"
 
 ---
 
@@ -360,11 +370,13 @@ Potential use cases:
 ### Currently Stored
 
 1. **Host Information**: ID, hostname, version, incarnation, HTTP credentials
-2. **Platform Information** (NEW): OS name/release/version, CPU architecture, CPU count, total memory, total swap
-3. **System Metrics** (NEW): System uptime, boot time
+2. **Platform Information**: OS name/release/version, CPU architecture, CPU count, total memory, total swap
+3. **System Metrics**: System uptime, boot time
 4. **Service Status**: Name, type, status, monitor state, collected timestamp
-5. **Process Metrics** (NEW): PID, CPU percentage, memory percentage, memory KB
-6. **Time-Series Metrics**: Load averages, CPU usage (user/system), memory usage, swap usage
+5. **Process Metrics**: PID, CPU percentage, memory percentage, memory KB
+6. **File Metrics** (Schema v4): Mode, UID, GID, size, hardlink count, timestamps (access/modify/change), checksum type/value
+7. **Program Metrics** (Schema v4): Started timestamp, exit status, program output
+8. **Time-Series Metrics**: Load averages, CPU usage (user/system), memory usage, swap usage
 
 ### Not Stored (But Parsed)
 
@@ -374,8 +386,6 @@ Fields that are parsed into Go structs but not persisted:
 - Process parent/child relationships (ppid, children count)
 - Process identity (uid, euid, gid)
 - Process details (threads, uptime)
-- File metadata (permissions, checksums, sizes)
-- Program output and exit codes
 
 ### Not Used At All
 
@@ -391,18 +401,25 @@ Fields available in XML but not parsed:
 
 ## Future Enhancement Opportunities
 
-### Recently Implemented (Schema v2)
+### Recently Implemented (Schema v4 - 2025-11-24)
 
-1. ✅ **Platform Information Display**: Shows OS, architecture, and hardware specs in dashboard
-2. ✅ **Process Resource Monitoring**: Displays per-process CPU/memory usage with color coding
-3. ✅ **Swap Monitoring**: Swap metrics stored for alerting on RAM pressure
-4. ✅ **System Uptime Display**: Shows system uptime and boot time in dashboard
+1. ✅ **XML Parser Fixed**: Fixed parser to handle `<services>` wrapper element and correct field types (type as element, name as attribute)
+2. ✅ **File Monitoring**: Complete file metrics storage including permissions, ownership, size, timestamps, and checksums
+3. ✅ **Program Monitoring**: Full program metrics storage including exit status and output
+4. ✅ **File Integrity Tracking**: All file metadata and checksums stored for integrity monitoring
+
+### Previously Implemented (Schema v2-v3)
+
+5. ✅ **Platform Information Display**: Shows OS, architecture, and hardware specs in dashboard
+6. ✅ **Process Resource Monitoring**: Displays per-process CPU/memory usage with color coding
+7. ✅ **Swap Monitoring**: Swap metrics stored for alerting on RAM pressure
+8. ✅ **System Uptime Display**: Shows system uptime and boot time in dashboard
 
 ### High Priority (Next)
 
-5. **File Descriptor Tracking**: Monitor FD usage to prevent exhaustion (system and per-process)
-6. **Process Resource Graphing**: Time-series graphs of per-process CPU/memory usage
-7. **Swap Usage Alerting**: Active alerts when swap usage exceeds thresholds
+9. **File Descriptor Tracking**: Monitor FD usage to prevent exhaustion (system and per-process)
+10. **Process Resource Graphing**: Time-series graphs of per-process CPU/memory usage
+11. **Swap Usage Alerting**: Active alerts when swap usage exceeds thresholds
 
 ### Medium Priority
 

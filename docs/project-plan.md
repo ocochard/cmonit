@@ -99,61 +99,32 @@ cmonit/
 5. SQLite database with initial schema
 6. Data insertion logic
 
-**Database Schema (Initial)**:
-```sql
--- Hosts table
-CREATE TABLE hosts (
-    id TEXT PRIMARY KEY,              -- Monit ID
-    hostname TEXT NOT NULL,
-    incarnation INTEGER,              -- Restart timestamp
-    version TEXT,                     -- Monit version
-    last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(hostname)
-);
+**Database Schema (Current - Version 4)**:
 
--- Services table
-CREATE TABLE services (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    host_id TEXT NOT NULL,
-    name TEXT NOT NULL,
-    type INTEGER,                     -- Service type (0-9)
-    status INTEGER,                   -- Current status
-    monitor INTEGER,                  -- Monitor mode
-    collected_at DATETIME,
-    last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (host_id) REFERENCES hosts(id),
-    UNIQUE(host_id, name)
-);
+The database schema has evolved through automatic migrations:
 
--- Time-series metrics table
-CREATE TABLE metrics (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    host_id TEXT NOT NULL,
-    service_name TEXT NOT NULL,
-    metric_type TEXT NOT NULL,        -- cpu, memory, disk, load, etc.
-    metric_name TEXT NOT NULL,        -- user, system, percent, etc.
-    value REAL NOT NULL,
-    collected_at DATETIME NOT NULL,
-    FOREIGN KEY (host_id) REFERENCES hosts(id)
-);
+- **Schema v1**: Initial schema with hosts, services, metrics, events tables
+- **Schema v2**: Added filesystem_metrics table for detailed filesystem monitoring
+- **Schema v3**: Added network_metrics table for network interface monitoring
+- **Schema v4** (Current): Added file_metrics and program_metrics tables
 
-CREATE INDEX idx_metrics_lookup ON metrics(host_id, service_name, metric_type, metric_name, collected_at);
-CREATE INDEX idx_metrics_time ON metrics(collected_at);
+See `internal/db/schema.go` for the complete current schema including:
 
--- Events table
-CREATE TABLE events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    host_id TEXT NOT NULL,
-    service_name TEXT NOT NULL,
-    event_type INTEGER,
-    message TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (host_id) REFERENCES hosts(id)
-);
+**Core Tables**:
+- `hosts` - Monitored host information with platform details and Monit daemon info
+- `services` - Services monitored on each host (all types)
+- `events` - Service state change events and Monit restart detection
 
-CREATE INDEX idx_events_time ON events(created_at DESC);
-```
+**Metrics Tables**:
+- `metrics` - Time-series system/process CPU, memory, load metrics
+- `filesystem_metrics` - Block/inode usage, filesystem type, I/O operations
+- `network_metrics` - Link state, speed, duplex, traffic statistics
+- `file_metrics` - File mode, ownership, timestamps, checksums (Type 2 services)
+- `program_metrics` - Program execution status and output (Type 7 services)
+
+**Schema Management**:
+- `schema_version` - Tracks current schema version with automatic migrations
+- All migrations are applied automatically on startup
 
 **Acceptance Tests**:
 - [ ] Server starts and listens on port 8080

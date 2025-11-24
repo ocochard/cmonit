@@ -1,5 +1,8 @@
 # Monit Collector Protocol Documentation
 
+**Last Updated:** 2025-11-24
+**Monit Version Tested:** 5.35.2
+
 ## Overview
 
 Monit agents send status and event data to M/Monit (or cmonit) via HTTP POST requests to the `/collector` endpoint.
@@ -48,7 +51,12 @@ set mmonit http://monit:monit@127.0.0.1:8080/collector
 
 ### XML Data Format
 
-The XML body contains the monit status with version 2 format:
+The XML body contains the monit status:
+
+**Important XML Structure Notes (Monit 5.35.2):**
+- Services are wrapped in a `<services>` container element
+- Service `name` is an **attribute**: `<service name="foo">`
+- Service `type` is an **element**: `<type>5</type>` (not an attribute)
 
 ```xml
 <?xml version="1.0" encoding="ISO-8859-1"?>
@@ -60,16 +68,27 @@ The XML body contains the monit status with version 2 format:
     <localhostname><hostname></localhostname>
     <controlfile><path></controlfile>
     <httpd>
-      <address><ip>:<port></address>
+      <address><ip></address>
+      <port><port></port>
       <ssl><0|1></ssl>
     </httpd>
+    <credentials>
+      <username><username></username>
+      <password><password></password>
+    </credentials>
   </server>
-  <hostgroups>
-    <name><![CDATA[groupname]]></name>
-    ...
-  </hostgroups>
+  <platform>
+    <name><os-name></name>
+    <release><os-release></release>
+    <version><os-version></version>
+    <machine><architecture></machine>
+    <cpu><cpu-count></cpu>
+    <memory><bytes></memory>
+    <swap><bytes></swap>
+  </platform>
   <services>
-    <service name="<service-name>" type="<0-9>">
+    <service name="<service-name>">
+      <type><0-9></type>
       <collected_sec><unix-timestamp></collected_sec>
       <collected_usec><microseconds></collected_usec>
       <status><0-9></status>
@@ -103,7 +122,7 @@ The XML body contains the monit status with version 2 format:
         </swap>
       </system>
 
-      <!-- Process service specific fields -->
+      <!-- Process service specific fields (Type 3) -->
       <pid><pid></pid>
       <ppid><ppid></ppid>
       <uid><uid></uid>
@@ -122,20 +141,118 @@ The XML body contains the monit status with version 2 format:
         <percent><value></percent>
         <percenttotal><value></percenttotal>
       </cpu>
+      <filedescriptors>
+        <open><count></open>
+        <opentotal><count></opentotal>
+        <limit>
+          <soft><limit></soft>
+          <hard><limit></hard>
+        </limit>
+      </filedescriptors>
+      <read>
+        <operations>
+          <count><count></count>
+          <total><total></total>
+        </operations>
+      </read>
+      <write>
+        <operations>
+          <count><count></count>
+          <total><total></total>
+        </operations>
+      </write>
 
-      <!-- Filesystem service specific fields -->
+      <!-- Filesystem service specific fields (Type 0) -->
+      <fstype><type></fstype>
+      <fsflags><flags></fsflags>
+      <mode><octal-mode></mode>
       <block>
         <percent><value></percent>
-        <usage><bytes></usage>
-        <total><bytes></total>
+        <usage><gigabytes></usage>
+        <total><gigabytes></total>
       </block>
       <inode>
         <percent><value></percent>
         <usage><count></usage>
         <total><count></total>
       </inode>
+      <read>
+        <bytes>
+          <count><count></count>
+          <total><total></total>
+        </bytes>
+        <operations>
+          <count><count></count>
+          <total><total></total>
+        </operations>
+      </read>
+      <write>
+        <bytes>
+          <count><count></count>
+          <total><total></total>
+        </bytes>
+        <operations>
+          <count><count></count>
+          <total><total></total>
+        </operations>
+      </write>
 
-      <!-- Port/connection checks -->
+      <!-- File service specific fields (Type 2) -->
+      <mode><octal-mode></mode>
+      <uid><uid></uid>
+      <gid><gid></gid>
+      <timestamps>
+        <access><unix-timestamp></access>
+        <change><unix-timestamp></change>
+        <modify><unix-timestamp></modify>
+      </timestamps>
+      <size><bytes></size>
+      <hardlink><count></hardlink>
+      <checksum type="MD5"><hash></checksum>
+
+      <!-- Program service specific fields (Type 7) -->
+      <program>
+        <started><unix-timestamp></started>
+        <status><exit-code></status>
+        <output><![CDATA[program output]]></output>
+      </program>
+
+      <!-- Network interface service specific fields (Type 8) -->
+      <link>
+        <state><0|1></state>
+        <speed><bits-per-second></speed>
+        <duplex><0|1></duplex>
+        <download>
+          <packets>
+            <now><count></now>
+            <total><count></total>
+          </packets>
+          <bytes>
+            <now><bytes></now>
+            <total><bytes></total>
+          </bytes>
+          <errors>
+            <now><count></now>
+            <total><count></total>
+          </errors>
+        </download>
+        <upload>
+          <packets>
+            <now><count></now>
+            <total><count></total>
+          </packets>
+          <bytes>
+            <now><bytes></now>
+            <total><bytes></total>
+          </bytes>
+          <errors>
+            <now><count></now>
+            <total><count></total>
+          </errors>
+        </upload>
+      </link>
+
+      <!-- Port/connection checks (Type 6) -->
       <port>
         <hostname><hostname></hostname>
         <portnumber><port></portnumber>

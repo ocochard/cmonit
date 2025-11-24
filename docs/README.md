@@ -137,7 +137,7 @@ go build -o cmonit ./cmd/cmonit && ./cmonit
 
 ## Database Schema
 
-The database uses schema versioning with automatic migrations:
+The database uses schema versioning with automatic migrations (current version: **4**):
 
 ### Core Tables
 
@@ -156,6 +156,27 @@ The database uses schema versioning with automatic migrations:
 - System CPU, memory, swap, load average
 - Per-process CPU and memory usage
 - Indexed by `(host_id, collected_at)` for fast queries
+
+**filesystem_metrics** - Time-series filesystem metrics (Schema v2)
+- Block/inode usage and percentages
+- Filesystem type, flags, permissions
+- Read/write operations and bytes
+
+**network_metrics** - Time-series network interface metrics (Schema v3)
+- Link state, speed, duplex mode
+- Upload/download packets, bytes, errors
+- Per-interface statistics
+
+**file_metrics** - File monitoring metrics (Schema v4)
+- File mode, ownership (uid/gid), size
+- Timestamps (access, change, modify)
+- Checksum type and value
+- Hard link count
+
+**program_metrics** - Program execution metrics (Schema v4)
+- Program start time and exit status
+- Program output (captured via CDATA)
+- Execution results tracking
 
 **events** - Service state change events
 - Automatic logging on status changes

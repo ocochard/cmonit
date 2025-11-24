@@ -192,19 +192,41 @@ func getHostDetailData(hostID string) (*DashboardData, error) {
 	// Calculate health status based on last_seen and poll_interval
 	lastSeenUnix := host.LastSeen.Unix()
 	healthStatus, _ := CalculateHostHealth(lastSeenUnix, host.PollInterval)
-	host.HealthStatus = string(healthStatus)
-	host.HealthEmoji = GetHealthEmoji(healthStatus)
-	host.HealthLabel = GetHealthLabel(healthStatus)
-	host.LastSeenText = FormatTimeSince(lastSeenUnix)
 
 	// Keep IsStale for backward compatibility (deprecated)
 	host.IsStale = time.Since(host.LastSeen) > 5*time.Minute
 
+	// Get services to check if any are failing
 	host.Services, err = getServicesForHost(host.ID)
 	if err != nil {
 		log.Printf("[ERROR] Failed to get services for host %s: %v", host.ID, err)
 		host.Services = []Service{}
 	}
+
+	// Adjust health status based on service failures
+	// If heartbeat shows offline (red), keep it red
+	// If heartbeat shows warning (yellow) or healthy (green), check services
+	hasFailedServices := false
+	for _, svc := range host.Services {
+		if svc.Status != 0 { // Not OK
+			hasFailedServices = true
+			break
+		}
+	}
+
+	// Downgrade health status if services are failing
+	if healthStatus == HealthStatusGreen && hasFailedServices {
+		// Host is connected but has failing services -> Warning
+		healthStatus = HealthStatusYellow
+	} else if healthStatus == HealthStatusYellow && hasFailedServices {
+		// Host is in warning state AND has failing services -> keep Yellow
+		// (this is already handled, but explicit for clarity)
+	}
+
+	host.HealthStatus = string(healthStatus)
+	host.HealthEmoji = GetHealthEmoji(healthStatus)
+	host.HealthLabel = GetHealthLabel(healthStatus)
+	host.LastSeenText = FormatTimeSince(lastSeenUnix)
 
 	return &DashboardData{
 		Hosts:      []HostWithServices{host},

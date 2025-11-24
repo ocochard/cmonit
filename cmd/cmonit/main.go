@@ -58,6 +58,14 @@ var globalDB *sql.DB
 // Controlled by the -debug command-line flag.
 var debugEnabled bool
 
+// collectorAuthUsername holds the username for collector HTTP Basic Auth
+// Set from the -user command-line flag, defaults to "monit"
+var collectorAuthUsername string
+
+// collectorAuthPassword holds the password for collector HTTP Basic Auth
+// Set from the -password command-line flag, defaults to "monit"
+var collectorAuthPassword string
+
 // main is the entry point of the program
 // Go programs always start execution here
 //
@@ -115,6 +123,15 @@ func main() {
 	debugFlag := flag.Bool("debug", false,
 		"Enable verbose DEBUG logging for troubleshooting")
 
+	collectorUser := flag.String("user", "monit",
+		"Collector HTTP Basic Auth username (Monit agents must use this)")
+
+	collectorPassword := flag.String("password", "monit",
+		"Collector HTTP Basic Auth password (Monit agents must use this)")
+
+	daemonMode := flag.Bool("daemon", false,
+		"Run in background as a daemon process")
+
 	// Parse command-line flags
 	//
 	// flag.Parse() processes os.Args (command-line arguments)
@@ -127,9 +144,63 @@ func main() {
 	//   ./cmonit -collector :9000 -web :4000 # Custom ports
 	flag.Parse()
 
+	// Handle daemon mode
+	//
+	// If -daemon flag is set, we detach from the controlling terminal
+	// and run in the background. This is done by re-executing ourselves
+	// with syscall attributes that create a new session.
+	if *daemonMode {
+		// Check if already daemonized by looking for our environment variable
+		if os.Getenv("CMONIT_DAEMONIZED") != "1" {
+			// Not yet daemonized - re-exec ourselves
+			args := make([]string, 0, len(os.Args))
+			for _, arg := range os.Args {
+				// Skip the -daemon flag for the child process
+				if arg != "-daemon" {
+					args = append(args, arg)
+				}
+			}
+
+			// Prepare syscall attributes for daemonization
+			execSpec := &syscall.ProcAttr{
+				Env: append(os.Environ(), "CMONIT_DAEMONIZED=1"),
+				Files: []uintptr{
+					// stdin, stdout, stderr -> /dev/null
+					uintptr(syscall.Stdin),
+					uintptr(syscall.Stdout),
+					uintptr(syscall.Stderr),
+				},
+				Sys: &syscall.SysProcAttr{
+					Setsid: true, // Create new session (detach from terminal)
+				},
+			}
+
+			// Get absolute path to current executable
+			execPath, err := os.Executable()
+			if err != nil {
+				log.Fatalf("[FATAL] Failed to get executable path for daemonization: %v", err)
+			}
+
+			// Fork and exec the child process
+			pid, err := syscall.ForkExec(execPath, args, execSpec)
+			if err != nil {
+				log.Fatalf("[FATAL] Failed to daemonize: %v", err)
+			}
+
+			// Parent process: print the child PID and exit
+			fmt.Printf("cmonit daemonized with PID %d\n", pid)
+			os.Exit(0)
+		}
+		// Already daemonized, continue normally
+	}
+
 	// Set global debug mode from flag
 	debugEnabled = *debugFlag
 	db.SetDebugMode(debugEnabled)
+
+	// Set collector authentication credentials from flags
+	collectorAuthUsername = *collectorUser
+	collectorAuthPassword = *collectorPassword
 
 	// Setup syslog if requested
 	//
@@ -164,6 +235,7 @@ func main() {
 	// Example output: "2025/11/22 21:30:00 [INFO] cmonit starting..."
 	log.Printf("[INFO] cmonit starting...")
 	log.Printf("[INFO] Collector will listen on: %s", *collectorAddr)
+	log.Printf("[INFO] Collector authentication: user=%s", collectorAuthUsername)
 	log.Printf("[INFO] Web UI will listen on: %s", *webAddr)
 	log.Printf("[INFO] Database path: %s", *dbPath)
 	log.Printf("[INFO] PID file: %s", *pidFile)
@@ -564,8 +636,8 @@ func handleCollector(w http.ResponseWriter, r *http.Request) {
 	//
 	// Three conditions must all be true (connected with &&):
 	// 1. ok == true: Basic Auth header was present and valid format
-	// 2. username == "monit": the username matches
-	// 3. password == "monit": the password matches
+	// 2. username matches the configured collector username (from -user flag)
+	// 3. password matches the configured collector password (from -password flag)
 	//
 	// The ! operator means "not", so !ok means "Basic Auth was NOT provided"
 	// || means "or", so if ANY condition is true, the whole expression is true
@@ -573,7 +645,7 @@ func handleCollector(w http.ResponseWriter, r *http.Request) {
 	// If auth fails, we need to:
 	// 1. Send WWW-Authenticate header (tells client to send credentials)
 	// 2. Return 401 Unauthorized status
-	if !ok || username != "monit" || password != "monit" {
+	if !ok || username != collectorAuthUsername || password != collectorAuthPassword {
 		// Set WWW-Authenticate header
 		// This tells the client:
 		// - "You need to authenticate"

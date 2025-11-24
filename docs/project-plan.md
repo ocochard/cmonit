@@ -556,14 +556,17 @@ ALTER TABLE hosts ADD COLUMN lifecycle TEXT DEFAULT 'production';
 ### Implementation Phases
 
 **Phase 1 (Essential) - Status Tracking:**
-- [ ] Store poll_interval in database
-- [ ] Add schema v5 migration
-- [ ] Implement health status calculation helper
-- [ ] Add health indicator to dashboard (🟢🟡🔴)
-- [ ] Show "last seen" with human-readable time
-- [ ] Add DELETE /admin/hosts/:id API endpoint
-- [ ] Add cascade deletion function
-- [ ] Add delete confirmation UI with hostname verification
+- [x] Store poll_interval in database
+- [x] Add schema v7 migration (includes poll_interval field)
+- [x] Implement health status calculation helper
+- [x] Add health indicator to dashboard (🟢🟡🔴)
+- [x] Show "last seen" with human-readable time
+- [x] Add DELETE /admin/hosts/:id API endpoint
+- [x] Add cascade deletion function
+- [x] Add delete confirmation UI with hostname verification
+
+**Known Issues Fixed:**
+- ~~Bug: DELETE endpoint returned HTTP 500 due to incorrect DATETIME-to-integer conversion~~ Fixed in `/internal/db/storage.go:1170` using `CAST(strftime('%s', last_seen) AS INTEGER)`
 
 **Phase 2 (Enhanced) - Archive System:**
 - [ ] Add archived flag and timestamps
@@ -581,14 +584,14 @@ ALTER TABLE hosts ADD COLUMN lifecycle TEXT DEFAULT 'production';
 ### Acceptance Tests
 
 Phase 1:
-- [ ] Poll interval correctly stored from XML
-- [ ] Health status calculates correctly (green/yellow/red)
-- [ ] Dashboard shows visual health indicators
-- [ ] Cannot delete host active within last hour
-- [ ] Delete requires correct hostname confirmation
-- [ ] Deletion cascades to all related tables
-- [ ] Metrics/events/services deleted with host
-- [ ] Database integrity maintained after deletion
+- [x] Poll interval correctly stored from XML
+- [x] Health status calculates correctly (green/yellow/red)
+- [x] Dashboard shows visual health indicators
+- [x] Cannot delete host active within last hour
+- [x] Delete requires correct hostname confirmation
+- [x] Deletion cascades to all related tables
+- [x] Metrics/events/services deleted with host
+- [x] Database integrity maintained after deletion
 
 ---
 

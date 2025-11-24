@@ -1165,9 +1165,9 @@ func DeleteHost(db *sql.DB, hostID string) (*DeleteHostStats, error) {
 	stats := &DeleteHostStats{}
 
 	// First, check if the host exists and get its last_seen
-	// Note: last_seen is stored as DATETIME, so we convert it to Unix timestamp
+	// Note: last_seen is stored as DATETIME, convert it to Unix timestamp
 	var lastSeen int64
-	err := db.QueryRow("SELECT strftime('%s', last_seen) FROM hosts WHERE id = ?", hostID).Scan(&lastSeen)
+	err := db.QueryRow("SELECT CAST(strftime('%s', last_seen) AS INTEGER) FROM hosts WHERE id = ?", hostID).Scan(&lastSeen)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("host not found: %s", hostID)
 	}

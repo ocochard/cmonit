@@ -354,11 +354,11 @@ func StoreService(db *sql.DB, hostID string, service *parser.Service) error {
 	if service.Type == 3 {
 		pid = service.PID
 		if service.CPU != nil {
-			cpuPercent = &service.CPU.Percent
+			cpuPercent = &service.CPU.PercentTotal
 		}
 		if service.Memory != nil {
-			memoryPercent = &service.Memory.Percent
-			memoryKB = &service.Memory.Kilobyte
+			memoryPercent = &service.Memory.PercentTotal
+			memoryKB = &service.Memory.KilobyteTotal
 		}
 	}
 

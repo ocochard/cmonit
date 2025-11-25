@@ -682,13 +682,14 @@ func getServiceStatusInfo(status int) (string, string) {
 
 // StatusMessage returns a human-readable status message for the service.
 //
-// Monit status codes (from monit-5.35.2/src/monit.h):
+// Monit status codes (from monit-5.35.2/src/monit.h and event.h):
 // - 0: OK
 // - 1: Failed
 // - 2: Resource limit matched
 // - 4: Execution failed
 // - 8: Not monitored
 // - 16: Initializing
+// - 32: Connection failed (Event_Connection = 0x20)
 func (s *Service) StatusMessage() string {
 	switch s.Status {
 	case 0:
@@ -703,6 +704,8 @@ func (s *Service) StatusMessage() string {
 		return "Not monitored"
 	case 16:
 		return "Initializing"
+	case 32:
+		return "Connection failed"
 	default:
 		return fmt.Sprintf("Unknown status (%d)", s.Status)
 	}

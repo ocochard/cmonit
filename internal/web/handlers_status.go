@@ -590,11 +590,17 @@ func getServiceDetailData(hostID, serviceName string) (*ServiceDetailData, error
 
 	// Get process metrics if this is a process service (type 3)
 	if svc.Type == 3 {
-		data.ProcessData = &ProcessMetrics{
-			PID:           *svc.PID,
-			CPUPercent:    *svc.CPUPercent,
-			MemoryPercent: *svc.MemoryPercent,
-			MemoryKB:      *svc.MemoryKB,
+		// Only populate process data if all required fields are non-nil
+		if svc.PID != nil && svc.CPUPercent != nil && svc.MemoryPercent != nil && svc.MemoryKB != nil {
+			data.ProcessData = &ProcessMetrics{
+				PID:           *svc.PID,
+				CPUPercent:    *svc.CPUPercent,
+				MemoryPercent: *svc.MemoryPercent,
+				MemoryKB:      *svc.MemoryKB,
+			}
+		} else {
+			log.Printf("[WARN] Process metrics missing for service %s/%s (PID=%v, CPU=%v, Mem=%v, MemKB=%v)",
+				hostID, serviceName, svc.PID != nil, svc.CPUPercent != nil, svc.MemoryPercent != nil, svc.MemoryKB != nil)
 		}
 	}
 

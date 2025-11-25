@@ -58,10 +58,12 @@ cmonit/
 │   │   └── xml_test.go          # Parser unit tests
 │   └── web/
 │       ├── handler.go           # Dashboard HTTP handlers
+│       ├── handlers_status.go   # Service detail handlers
 │       ├── api.go               # Metrics & action APIs
 │       └── mmonit_api.go        # M/Monit compatibility API
 ├── templates/
-│   └── dashboard.html           # Single-file HTML template
+│   ├── dashboard.html           # Main dashboard template
+│   └── service.html             # Service detail template
 ├── rc.d/cmonit                  # FreeBSD startup script
 └── docs/                        # Developer documentation
 ```
@@ -72,12 +74,16 @@ cmonit/
 
 ### Core Functionality
 - ✅ HTTP collector endpoint receiving Monit XML status
-- ✅ SQLite storage with automatic schema migrations
-- ✅ Multi-page dashboard: Status, Host Details, Events
+- ✅ SQLite storage with automatic schema migrations (current: v8)
+- ✅ Multi-page dashboard: Status, Host Details, Service Details, Events
 - ✅ Real-time system metrics graphs (Load, CPU, Memory)
 - ✅ Service control actions (start, stop, restart, monitor, unmonitor)
 - ✅ Event tracking with Monit restart detection
-- ✅ Stale host detection (>5 minutes without updates)
+- ✅ Intelligent host health indicators (green/yellow/red based on poll interval)
+- ✅ Host lifecycle management with safe deletion (>1 hour offline)
+- ✅ Remote host monitoring with ICMP/TCP/UDP response times
+- ✅ Comprehensive system metrics display (load, CPU breakdown, memory, swap)
+- ✅ Service detail pages for all service types (0-8)
 
 ### M/Monit API Compatibility
 - ✅ `GET /status/hosts` - List all hosts with status
@@ -86,6 +92,7 @@ cmonit/
 - ✅ `GET /events/list` - Query events with pagination
 - ✅ `GET /events/get/:id` - Get specific event details
 - ✅ `GET /admin/hosts` - Administrative host management
+- ✅ `DELETE /admin/hosts/:id` - Delete stale host and all related data
 
 ### Security & Production
 - ✅ HTTP Basic Authentication for web UI
@@ -137,15 +144,16 @@ go build -o cmonit ./cmd/cmonit && ./cmonit
 
 ## Database Schema
 
-The database uses schema versioning with automatic migrations (current version: **4**):
+The database uses schema versioning with automatic migrations (current version: **8**):
 
 ### Core Tables
 
 **hosts** - Monitored host information
 - Platform details (OS, CPU count, memory)
-- Monit daemon information (version, uptime)
+- Monit daemon information (version, uptime, poll_interval)
 - HTTP API credentials for actions
-- Last seen timestamp for staleness detection
+- Last seen timestamp for health status calculation
+- Health indicators based on poll_interval multiples
 
 **services** - Services monitored on each host
 - Service type, status, and monitoring state
@@ -178,6 +186,12 @@ The database uses schema versioning with automatic migrations (current version: 
 - Program output (captured via CDATA)
 - Execution results tracking
 
+**remote_host_metrics** - Remote host monitoring metrics (Schema v8)
+- ICMP ping response times and type
+- TCP/UDP port monitoring (hostname, port, protocol, response time)
+- Unix socket monitoring (path, protocol, response time)
+- Supports both Remote Host services (type 4) and Process services (type 3)
+
 **events** - Service state change events
 - Automatic logging on status changes
 - Monit restart detection
@@ -193,8 +207,9 @@ The database uses schema versioning with automatic migrations (current version: 
 
 ### Dashboard Web UI
 
-- `GET /` - Status overview (all hosts)
+- `GET /` - Status overview (all hosts with health indicators)
 - `GET /host/{id}` - Host details with graphs
+- `GET /host/{id}/service/{name}` - Service detail page with type-specific metrics
 - `GET /host/{id}/events` - Host event history
 - `GET /api/metrics?host={id}&range={1h|6h|24h}` - Metrics for graphs
 - `POST /api/action` - Execute service actions
@@ -213,6 +228,7 @@ All endpoints return JSON:
 - `GET /events/list?limit=N&offset=N` - Paginated events
 - `GET /events/get/{id}` - Single event
 - `GET /admin/hosts` - Administrative host list
+- `DELETE /admin/hosts/{id}` - Delete stale host (requires >1 hour offline)
 
 See `internal/web/mmonit_api.go` for implementation details.
 
@@ -270,9 +286,25 @@ See `rc.d/cmonit` for all configuration options.
 
 ---
 
+## Service Types Supported
+
+cmonit fully supports all Monit service types with dedicated detail pages:
+
+- **Type 0 (Filesystem)**: Block/inode usage, I/O operations, filesystem type
+- **Type 1 (Directory)**: Path, timestamps, permissions
+- **Type 2 (File)**: Mode, ownership, size, checksums, timestamps
+- **Type 3 (Process)**: CPU%, memory, PID, threads, file descriptors, port/unix socket monitoring
+- **Type 4 (Remote Host)**: ICMP ping, TCP/UDP port checks, response times
+- **Type 5 (System)**: Load average, CPU breakdown, memory/swap usage
+- **Type 6 (Fifo)**: Path, timestamps, permissions
+- **Type 7 (Program)**: Exit status, execution output
+- **Type 8 (Network)**: Link state, speed, duplex, upload/download statistics
+
+---
+
 ## Known Limitations
 
-1. **M/Monit API**: Partial implementation - read-only status/events queries only
+1. **M/Monit API**: Partial implementation - basic status/events/admin queries only
 2. **Multi-user auth**: Only single username/password for web UI
 3. **HTTPS collector**: Collector endpoint is HTTP only (agents use HTTP Basic Auth)
 4. **Push-only**: No active polling of Monit agents (by design)

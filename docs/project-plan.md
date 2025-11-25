@@ -5,85 +5,9 @@
 
 **cmonit** is an open-source clone of the proprietary M/Monit software that provides centralized monitoring and management of all Monit-enabled hosts via a modern, clean, and mobile-friendly web interface.
 
-## Technology Stack
+For detailed architecture, technology stack, and implementation details, see **[docs/README.md](README.md)** - the main developer reference.
 
-### Backend
-- **Language**: Go (Golang) - KISS principle, excellent for HTTP services and concurrency
-- **Database**: SQLite - Simple, embedded, serverless, perfect for this use case
-- **HTTP Framework**: Standard library `net/http` with `gorilla/mux` for routing (optional)
-
-### Frontend
-- **CSS Framework**: Tailwind CSS (loaded via CDN)
-- **Charting**: Chart.js (loaded via CDN)
-- **Templates**: Go `html/template` for server-side rendering
-
-### Why This Stack?
-
-**Go Advantages**:
-- Single binary deployment (no dependencies)
-- Excellent HTTP and concurrent request handling
-- Built-in templating
-- Strong standard library
-- Cross-platform compilation
-- Low memory footprint
-
-**SQLite Advantages**:
-- No separate database server needed
-- Zero configuration
-- ACID compliant
-- Perfect for embedded systems
-- File-based (easy backup/migration)
-
-**Tailwind + Chart.js**:
-- No build step required (CDN-based)
-- Modern, responsive design out of the box
-- Chart.js is simple and lightweight
-- Mobile-friendly by default
-
-## Project Structure
-
-```
-cmonit/
-├── cmd/
-│   └── cmonit/
-│       └── main.go          # Entry point
-├── internal/
-│   ├── api/
-│   │   ├── collector.go     # /collector endpoint (receives from Monit)
-│   │   ├── api.go           # M/Monit-compatible HTTP API
-│   │   └── handlers.go      # HTTP handlers
-│   ├── db/
-│   │   ├── schema.go        # Database schema
-│   │   ├── models.go        # Data models
-│   │   ├── queries.go       # Database queries
-│   │   └── migrations.go    # Schema initialization
-│   ├── parser/
-│   │   └── xml.go           # Monit XML parser
-│   ├── web/
-│   │   ├── server.go        # Web server setup
-│   │   └── handlers.go      # Web UI handlers
-│   └── config/
-│       └── config.go        # Configuration management
-├── web/
-│   ├── templates/
-│   │   ├── base.html        # Base template
-│   │   ├── dashboard.html   # Dashboard view
-│   │   ├── host.html        # Single host view
-│   │   └── graphs.html      # Time-series graphs
-│   └── static/
-│       └── (optional custom CSS/JS)
-├── docs/
-│   ├── monit-collector-protocol.md
-│   ├── project-plan.md
-│   ├── api-compatibility.md
-│   └── testing-plan.md
-├── LICENSE
-├── README.md
-├── go.mod
-├── go.sum
-├── Makefile
-└── .gitignore
-```
+This document focuses on development phases, planning, and strategy.
 
 ## Development Phases
 
@@ -99,32 +23,7 @@ cmonit/
 5. SQLite database with initial schema
 6. Data insertion logic
 
-**Database Schema (Current - Version 4)**:
-
-The database schema has evolved through automatic migrations:
-
-- **Schema v1**: Initial schema with hosts, services, metrics, events tables
-- **Schema v2**: Added filesystem_metrics table for detailed filesystem monitoring
-- **Schema v3**: Added network_metrics table for network interface monitoring
-- **Schema v4** (Current): Added file_metrics and program_metrics tables
-
-See `internal/db/schema.go` for the complete current schema including:
-
-**Core Tables**:
-- `hosts` - Monitored host information with platform details and Monit daemon info
-- `services` - Services monitored on each host (all types)
-- `events` - Service state change events and Monit restart detection
-
-**Metrics Tables**:
-- `metrics` - Time-series system/process CPU, memory, load metrics
-- `filesystem_metrics` - Block/inode usage, filesystem type, I/O operations
-- `network_metrics` - Link state, speed, duplex, traffic statistics
-- `file_metrics` - File mode, ownership, timestamps, checksums (Type 2 services)
-- `program_metrics` - Program execution status and output (Type 7 services)
-
-**Schema Management**:
-- `schema_version` - Tracks current schema version with automatic migrations
-- All migrations are applied automatically on startup
+**Database Schema**: See `internal/db/schema.go` and [docs/README.md](README.md) for complete schema details. Schema is automatically migrated on startup.
 
 **Acceptance Tests**:
 - [ ] Server starts and listens on port 8080
@@ -321,61 +220,6 @@ Administrative:
 
 ---
 
-## Deployment
-
-### Binary Distribution
-```bash
-# Build for current platform
-make build
-
-# Build for all platforms
-make build-all
-
-# Output:
-# bin/cmonit-linux-amd64
-# bin/cmonit-freebsd-amd64
-# bin/cmonit-darwin-amd64
-```
-
-### Running
-```bash
-# Start with default settings
-./cmonit
-
-# Custom config
-./cmonit --config /path/to/config.yaml
-
-# Specify database location
-./cmonit --db /path/to/cmonit.db
-
-# Change ports
-./cmonit --collector-port 8080 --web-port 3000
-```
-
-### Configuration File (cmonit.yaml)
-```yaml
-collector:
-  port: 8080
-  auth:
-    username: monit
-    password: monit
-  compression: true
-
-web:
-  port: 3000
-  refresh_interval: 30
-
-database:
-  path: ./cmonit.db
-  retention_days: 30
-
-logging:
-  level: info
-  format: json
-```
-
----
-
 ## Development Workflow
 
 ### Day 1-2: Phase 1 - Collector Setup
@@ -413,21 +257,6 @@ logging:
 3. Create deployment guide
 4. Performance testing
 5. Bug fixes
-
----
-
-## Success Criteria
-
-The project will be considered successful when:
-
-1. ✅ cmonit receives and stores data from at least one Monit agent
-2. ✅ Web dashboard displays real-time status of all monitored services
-3. ✅ Time-series graphs show historical metrics
-4. ✅ M/Monit API endpoints return correct data
-5. ✅ All acceptance tests pass
-6. ✅ System runs stably for 24+ hours
-7. ✅ Documentation is complete
-8. ✅ Single binary deployment works on FreeBSD, Linux, and macOS
 
 ---
 
@@ -511,244 +340,102 @@ Create a Go tool that simulates multiple Monit agents sending data:
 
 ---
 
-## Phase 5: Host Lifecycle Management
+## Completed Enhancements (Post Phase 4)
 
-**Goal**: Intelligent stale host detection and host deletion functionality for dynamic infrastructure
+The following features have been successfully implemented beyond the original 4-phase plan:
 
-### Features
+### Host Lifecycle Management (✅ Completed)
 
-**1. Heartbeat-Based Health Status**
-- Store poll interval from Monit (typically 30s)
-- Three-state health indicator:
-  - 🟢 Green (Healthy): `last_seen < poll_interval * 2`
-  - 🟡 Yellow (Warning): `poll_interval * 2 <= last_seen < poll_interval * 5`
-  - 🔴 Red (Offline): `last_seen >= poll_interval * 5`
-- Visual status on dashboard with "last seen" timestamp
-- No false alarms during maintenance windows
+**Goal**: Intelligent stale host detection and deletion for dynamic infrastructure
 
-**2. Host Deletion with Safety**
-- Delete button for offline hosts (>1 hour)
-- Confirmation dialog requiring hostname entry
-- Shows deletion impact (services, metrics, events count)
+**Implemented Features**:
+- Heartbeat-based health status (green/yellow/red based on poll_interval)
+- Host deletion API with safety controls (>1 hour offline required)
 - Cascade deletion across all related tables
-- Safety: Cannot delete recently active hosts
+- Dashboard visual health indicators
 
-**3. Future Enhancements**
-- Soft delete/archive functionality (Phase 2)
-- Host lifecycle tags: production, ephemeral, testing, staging (Phase 2)
-- Auto-archive policies for ephemeral hosts (Phase 3)
-- Batch operations for multiple hosts (Phase 3)
-- Data export before deletion (Phase 3)
-
-### Database Schema Changes (Schema v5)
-
-```sql
-ALTER TABLE hosts ADD COLUMN poll_interval INTEGER DEFAULT 30;
-```
-
-**Future schema additions** (Phase 2+):
-```sql
-ALTER TABLE hosts ADD COLUMN archived INTEGER DEFAULT 0;
-ALTER TABLE hosts ADD COLUMN archived_at DATETIME;
-ALTER TABLE hosts ADD COLUMN lifecycle TEXT DEFAULT 'production';
-```
-
-### Implementation Phases
-
-**Phase 1 (Essential) - Status Tracking:**
-- [x] Store poll_interval in database
-- [x] Add schema v7 migration (includes poll_interval field)
-- [x] Implement health status calculation helper
-- [x] Add health indicator to dashboard (🟢🟡🔴)
-- [x] Show "last seen" with human-readable time
-- [x] Add DELETE /admin/hosts/:id API endpoint
-- [x] Add cascade deletion function
-- [x] Add delete confirmation UI with hostname verification
-
-**Known Issues Fixed:**
-- ~~Bug: DELETE endpoint returned HTTP 500 due to incorrect DATETIME-to-integer conversion~~ Fixed in `/internal/db/storage.go:1170` using `CAST(strftime('%s', last_seen) AS INTEGER)`
-
-**Phase 2 (Enhanced) - Archive System:**
-- [ ] Add archived flag and timestamps
-- [ ] Implement archive/restore functionality
-- [ ] Show deletion impact statistics
-- [ ] Add "Archived Hosts" page
-- [ ] Host lifecycle tags
-
-**Phase 3 (Advanced) - Automation:**
-- [ ] Auto-archive policies based on lifecycle
-- [ ] Batch operations (archive/delete multiple)
-- [ ] Data export before deletion
-- [ ] Email notifications before auto-archive
-
-### Acceptance Tests
-
-Phase 1:
-- [x] Poll interval correctly stored from XML
-- [x] Health status calculates correctly (green/yellow/red)
-- [x] Dashboard shows visual health indicators
-- [x] Cannot delete host active within last hour
-- [x] Delete requires correct hostname confirmation
-- [x] Deletion cascades to all related tables
-- [x] Metrics/events/services deleted with host
-- [x] Database integrity maintained after deletion
+See [docs/README.md](README.md) for complete implementation details.
 
 ---
 
-## Phase 6: Enhanced System Metrics Display
+### Enhanced System Metrics Display (✅ Completed)
 
-**Goal**: Display comprehensive system metrics (CPU breakdown, load average, memory, swap) in the Service Details page for System type services
+**Goal**: Comprehensive system metrics display in service detail pages
 
-### Current State
+**Implemented Features**:
+- Load average (1min, 5min, 15min) with visual indicators
+- CPU usage breakdown (platform-aware: FreeBSD vs Linux)
+- Memory/Swap usage with color-coded progress bars
+- Formatted size display (KB/MB/GB)
+- Mobile-responsive design
 
-The System service type (type=5) currently shows minimal metrics in the service detail view. However, Monit agents already report comprehensive system information including:
+See [docs/README.md](README.md) for complete implementation details and `templates/service.html` for UI implementation.
 
-**Available Data** (from XML parser in `internal/parser/xml.go`):
-- **Load Average**: `Avg01`, `Avg05`, `Avg15` - 1min, 5min, and 15min load averages
-- **CPU Usage**: `User`, `System`, `Nice`, `HardIRQ`, `Wait` (Linux also includes: IOWait, SoftIRQ, Steal, Guest, GuestNice)
-- **Memory Usage**: `Percent`, `Kilobyte` - RAM usage percentage and absolute KB
-- **Swap Usage**: `Percent`, `Kilobyte` - Swap usage percentage and absolute KB
+---
 
-**Current Database Storage** (`metrics` table):
-- System metrics ARE being stored: `load_1min`, `load_5min`, `load_15min`, `cpu_user`, `cpu_sys`, `cpu_nice`, `cpu_wait`, `memory_pct`, `memory_kb`, `swap_pct`, `swap_kb`
+## Changelog
 
-**Problem**: The service detail page (`templates/service.html`) only displays basic information and doesn't show these comprehensive system metrics.
+All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-### Requirements
+### [Unreleased]
 
-**User Request**: "Display comprehensive system metrics in the Service Details page including:
-- Load average (3 values: 1min, 5min, 15min)
-- CPU usage breakdown (varies by OS):
-  - Linux: %usr, %sys, %nice, %iowait, %hardirq, %softirq, %steal, %guest, %guestnice
-  - FreeBSD: %usr, %sys, %nice, %hardirq
-- Memory usage (percentage and formatted size)
-- Swap usage (percentage and formatted size)"
+#### Added
+- **Remote Host Monitoring Support**: Full support for Monit Remote Host service monitoring (type 4)
+  - Database schema upgraded to version 8 with new `remote_host_metrics` table
+  - Captures ICMP (ping) response times with ping type information
+  - Captures TCP/UDP port monitoring metrics including target hostname, port number, protocol, and response times
+  - Captures Unix socket monitoring metrics including socket path, protocol, and response times
+  - Also supports port and unix socket monitoring for Process services (type 3)
+  - Service detail template displays remote host metrics with color-coded response time indicators
+    - Green: < 100ms (ICMP/Port) or < 50ms (Unix socket)
+    - Yellow: 100-500ms (ICMP/Port) or 50-200ms (Unix socket)
+    - Red: > 500ms (ICMP/Port) or > 200ms (Unix socket)
+  - Files modified:
+    - `internal/db/schema.go`: Added remote_host_metrics table and migration to v8
+    - `internal/parser/xml.go`: Added ICMPInfo, PortInfo, UnixSocketInfo structs
+    - `internal/db/storage.go`: Added StoreRemoteHostMetrics function
+    - `templates/service.html`: Added Remote Host Metrics display section (lines 375-455)
 
-### Implementation Plan
+- **Comprehensive System Metrics Display**: Service detail page now displays full system metrics for System type services (type=5)
+  - Load Average: 1-minute, 5-minute, and 15-minute load averages displayed in responsive grid layout
+  - CPU Usage Breakdown: Platform-aware display of CPU metrics with color-coded progress bars
+    - FreeBSD: User, System, Nice, Hard IRQ
+    - Linux: User, System, Nice, I/O Wait, Hard IRQ, Soft IRQ, Steal, Guest, Guest Nice
+  - Memory Usage: Visual percentage bar with color-coding (green < 80%, yellow 80-90%, red > 90%) and formatted size display (KB/MB/GB)
+  - Swap Usage: Visual percentage bar with color-coding and formatted size display
+  - File modified: `templates/service.html` (lines 457-656)
+  - Conditional rendering gracefully handles platform differences between FreeBSD and Linux Monit agents
 
-**Phase 1: Backend Data Flow** ✓ (Already Complete)
-- [x] XML parser captures all system metrics (`internal/parser/xml.go`)
-- [x] Storage layer saves metrics to database (`internal/db/storage.go`)
-- [x] Service detail handler passes data to template (`internal/web/handlers.go`)
+#### Enhanced
+- **Process Service Metrics**: Fixed CPU and memory metrics for Process type services to include child processes
+  - Now displays total CPU/memory usage (process + children) instead of process-only metrics
+  - Aligns with Monit's standard behavior of monitoring process families
 
-**Phase 2: Template Enhancement** (To Implement)
-1. Read current `templates/service.html` structure
-2. Identify System service section (type=5)
-3. Add comprehensive metrics display sections:
-   - **Load Average Section**: Display 3 values with visual indicators
-   - **CPU Usage Breakdown**: Show all available CPU metrics with percentage bars
-   - **Memory Usage**: Display percentage + formatted size (KB/MB/GB conversion)
-   - **Swap Usage**: Display percentage + formatted size
-4. Add CSS styling for visual clarity
-5. Ensure responsive design (mobile-friendly)
+#### Fixed
+- XML parsing for process metrics now correctly captures total CPU and memory (including children)
+- Service detail page template now properly displays process family metrics
+- **CPU Usage Breakdown Display**: Fixed template conditional logic that prevented CPU metrics from displaying when values were 0.0%
+  - Basic CPU metrics (User, System, Nice, I/O Wait) now always display for all hosts, even at 0%
+  - Extended Linux-specific metrics (Hard IRQ, Soft IRQ, Steal, Guest, Guest Nice) only display when at least one is non-zero
+  - File modified: `templates/service.html` (lines 505-600)
+- **Remote Host Metrics XML Parsing**: Fixed XML parser to correctly extract ICMP, Port, and Unix socket monitoring data
+  - Added ICMP, Port, Unix fields to ServiceXML proxy struct in `internal/parser/xml.go` (lines 931-934)
+  - Updated ToService() function to copy these fields to domain Service struct (lines 954-956)
+  - Remote host metrics are now correctly stored in database and displayed on service detail pages
+  - Previously, metrics data was present in XML from Monit agents but was not being parsed/stored
+- **Remote Host Template Type Mismatch**: Fixed Go template type mismatch error preventing response times from displaying
+  - Changed integer literals to float literals in template comparisons (`templates/service.html` lines 392, 421)
+  - Template was comparing float64 response time values with integer literals, causing "incompatible types for comparison" error
+  - Fixed comparisons: `100` → `100.0`, `500` → `500.0` for both ICMP and Port response time color-coding
 
-**Phase 3: Handler Data Preparation** (To Verify)
-1. Check `internal/web/handlers.go` service detail handler
-2. Verify all system metrics are being passed to template
-3. Add any missing data queries for System services
-4. Ensure metrics are queried from database correctly
+### [0.1.0] - Initial Release
 
-**Phase 4: UI/UX Design Considerations**
-- Group related metrics into clear sections
-- Use progress bars for percentages (CPU, memory, swap)
-- Format large numbers (KB → MB/GB) for readability
-- Add tooltips for technical terms
-- Use color coding (green=low, yellow=medium, red=high)
-- Ensure consistency with existing UI design patterns
-
-### Files to Modify
-
-1. **`templates/service.html`** (Primary)
-   - Add System metrics display sections
-   - Update HTML structure with proper Tailwind CSS classes
-   - Add metric visualization (progress bars, badges)
-
-2. **`internal/web/handlers.go`** (If needed)
-   - Verify `handleServiceDetail()` function
-   - Ensure System metrics are queried and passed to template
-   - Add helper functions for data formatting if needed
-
-3. **`internal/db/queries.go`** (If needed)
-   - Verify system metrics query functions
-   - Add any missing queries for historical data
-
-### Acceptance Tests
-
-**Functional Tests**:
-- [ ] Service detail page displays all load average values (1min, 5min, 15min)
-- [ ] CPU usage breakdown shows all available metrics for the OS
-- [ ] Memory usage displays both percentage and formatted size
-- [ ] Swap usage displays both percentage and formatted size
-- [ ] Metrics update when page refreshes
-- [ ] N/A displayed when metrics are not available
-- [ ] Values are formatted correctly (e.g., "1.2 GB" not "1234567 KB")
-
-**Visual Tests**:
-- [ ] Metrics are clearly grouped and labeled
-- [ ] Progress bars display correctly for percentages
-- [ ] Layout is responsive on mobile devices
-- [ ] Color coding is consistent with rest of application
-- [ ] No visual glitches or layout issues
-
-**Integration Tests**:
-- [ ] FreeBSD system metrics display correctly
-- [ ] Linux system metrics display correctly (if available)
-- [ ] Historical graphs include new metrics (future enhancement)
-- [ ] API endpoints return system metrics (existing functionality)
-
-### Implementation Steps
-
-**Step 1**: Read and analyze current `templates/service.html`
-- Understand existing template structure
-- Identify System service display section
-- Note current styling patterns
-
-**Step 2**: Design metrics layout
-- Sketch sections for Load, CPU, Memory, Swap
-- Decide on visualization approach (progress bars, badges, etc.)
-- Plan responsive design
-
-**Step 3**: Implement template changes
-- Add Load Average section
-- Add CPU Usage Breakdown section
-- Add Memory Usage section
-- Add Swap Usage section
-- Apply consistent styling
-
-**Step 4**: Verify handler data flow
-- Check that all metrics are passed to template
-- Add any missing database queries
-- Test with live data
-
-**Step 5**: Test and refine
-- Test on FreeBSD system (primary environment)
-- Verify all metrics display correctly
-- Check mobile responsiveness
-- Fix any issues
-
-### Platform Considerations
-
-**FreeBSD** (Primary development environment):
-- CPU metrics: User, System, Nice, HardIRQ
-- No IOWait, SoftIRQ, Steal, Guest, GuestNice
-
-**Linux** (Secondary support):
-- Full CPU breakdown including IOWait, SoftIRQ, Steal, Guest, GuestNice
-- Template should handle both cases gracefully
-
-**Display Strategy**:
-- Show all metrics that are available
-- Display "N/A" or hide sections for unavailable metrics
-- Use conditional rendering in template
-
-### Future Enhancements (Post-Implementation)
-
-- Historical graphs for system metrics (Phase 3 enhancement)
-- Alert thresholds for system metrics
-- Comparative view across multiple hosts
-- Export system metrics to CSV
-- System health score calculation
-- Predictive analysis (trend detection)
+#### Added
+- Core collector functionality to receive XML status from Monit agents
+- SQLite database storage for hosts, services, and metrics
+- Web dashboard for status overview
+- Service detail pages for individual service monitoring
+- Support for multiple service types: Filesystem, Process, File, Network, Program, System
 
 ---
 

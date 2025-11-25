@@ -115,16 +115,17 @@ type Event struct {
 
 // ServiceDetailData holds data for the service detail page.
 type ServiceDetailData struct {
-	HostID          string             // Host ID
-	Hostname        string             // Host display name
-	Service         Service            // Service information
-	FilesystemData  *FilesystemMetrics // Filesystem metrics (if type 0)
-	FileData        *FileMetrics       // File metrics (if type 2)
-	ProcessData     *ProcessMetrics    // Process metrics (if type 3)
-	SystemData      *SystemMetrics     // System metrics (if type 5)
-	ProgramData     *ProgramMetrics    // Program metrics (if type 7)
-	NetworkData     *NetworkMetrics    // Network metrics (if type 8)
-	LastUpdate      time.Time          // When this data was retrieved
+	HostID          string              // Host ID
+	Hostname        string              // Host display name
+	Service         Service             // Service information
+	FilesystemData  *FilesystemMetrics  // Filesystem metrics (if type 0)
+	FileData        *FileMetrics        // File metrics (if type 2)
+	ProcessData     *ProcessMetrics     // Process metrics (if type 3)
+	SystemData      *SystemMetrics      // System metrics (if type 5)
+	ProgramData     *ProgramMetrics     // Program metrics (if type 7)
+	NetworkData     *NetworkMetrics     // Network metrics (if type 8)
+	RemoteHostData  *RemoteHostMetrics  // Remote host metrics (if type 3 or 4)
+	LastUpdate      time.Time           // When this data was retrieved
 }
 
 // FilesystemMetrics holds filesystem service metrics.
@@ -219,6 +220,25 @@ type SystemMetrics struct {
 	// Swap Usage
 	SwapPercent float64 // Swap usage percentage
 	SwapKB      int64   // Swap usage in KB
+}
+
+// RemoteHostMetrics holds remote host service metrics (ICMP, Port, Unix socket).
+type RemoteHostMetrics struct {
+	// ICMP Metrics
+	ICMPType           string  // Ping type (e.g., "echo")
+	ICMPResponseTimeMs float64 // Response time in milliseconds
+
+	// Port Metrics
+	PortHostname       string  // Target hostname for port monitoring
+	PortNumber         int     // Port number
+	PortProtocol       string  // Protocol (e.g., "TCP" or "UDP")
+	PortType           string  // Port type
+	PortResponseTimeMs float64 // Response time in milliseconds
+
+	// Unix Socket Metrics
+	UnixPath           string  // Unix socket path
+	UnixProtocol       string  // Protocol
+	UnixResponseTimeMs float64 // Response time in milliseconds
 }
 
 // =============================================================================

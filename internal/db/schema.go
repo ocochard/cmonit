@@ -39,7 +39,7 @@ import (
 
 // currentSchemaVersion is the current database schema version.
 // Increment this when making schema changes that require migration.
-const currentSchemaVersion = 7
+const currentSchemaVersion = 8
 
 // SQL schema for the cmonit database
 //
@@ -491,6 +491,56 @@ const (
 	createProgramMetricsIndex = `
 	CREATE INDEX IF NOT EXISTS idx_program_metrics_lookup
 		ON program_metrics(host_id, service_name, collected_at);`
+
+	// createRemoteHostMetricsTable creates the remote_host_metrics table
+	//
+	// This table stores remote host monitoring metrics (ping, port, unix socket response times).
+	// Only populated for remote host services (type 4) and process services with unix sockets (type 3).
+	//
+	// Columns:
+	//   - id: Auto-incrementing integer
+	//   - host_id: Which host this metric is from
+	//   - service_name: Remote host service name (e.g., "homeassistant")
+	//   - icmp_type: ICMP check type (usually "Ping")
+	//   - icmp_responsetime: Ping response time in seconds (e.g., 0.000348)
+	//   - port_hostname: Hostname/IP being monitored for port checks
+	//   - port_number: Port number being monitored
+	//   - port_protocol: Protocol being used (DEFAULT, etc.)
+	//   - port_type: Connection type (TCP, UDP)
+	//   - port_responsetime: Port response time in seconds (e.g., 0.000755)
+	//   - unix_path: Unix socket path (for process services with unix socket monitoring)
+	//   - unix_protocol: Unix socket protocol
+	//   - unix_responsetime: Unix socket response time in seconds (-1.0 if failed)
+	//   - collected_at: When this data was collected
+	//
+	// This is time-series data like the metrics table, allowing us to
+	// track response times over time and detect network issues or service degradation.
+	createRemoteHostMetricsTable = `
+	CREATE TABLE IF NOT EXISTS remote_host_metrics (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		host_id TEXT NOT NULL,
+		service_name TEXT NOT NULL,
+		icmp_type TEXT,
+		icmp_responsetime REAL,
+		port_hostname TEXT,
+		port_number INTEGER,
+		port_protocol TEXT,
+		port_type TEXT,
+		port_responsetime REAL,
+		unix_path TEXT,
+		unix_protocol TEXT,
+		unix_responsetime REAL,
+		collected_at DATETIME NOT NULL,
+		FOREIGN KEY (host_id) REFERENCES hosts(id)
+	);`
+
+	// createRemoteHostMetricsIndex creates index for fast remote host metrics queries
+	//
+	// Optimizes queries like:
+	// "Show me ping response times for homeassistant on host123 over the last week"
+	createRemoteHostMetricsIndex = `
+	CREATE INDEX IF NOT EXISTS idx_remote_host_metrics_lookup
+		ON remote_host_metrics(host_id, service_name, collected_at);`
 )
 
 // InitDB initializes the database and creates all tables.
@@ -747,6 +797,20 @@ func InitDB(dbPath string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to create program_metrics index: %w", err)
 	}
 
+	// Create remote_host_metrics table
+	_, err = db.Exec(createRemoteHostMetricsTable)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to create remote_host_metrics table: %w", err)
+	}
+
+	// Create remote_host_metrics index
+	_, err = db.Exec(createRemoteHostMetricsIndex)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to create remote_host_metrics index: %w", err)
+	}
+
 	log.Printf("[INFO] Database schema created successfully")
 
 	// Return the database connection
@@ -977,6 +1041,29 @@ func migrateSchema(db *sql.DB, fromVersion, toVersion int) error {
 				return err
 			}
 			log.Printf("[INFO] Successfully migrated to schema version 7")
+
+		case 7:
+			// Migration from version 7 to version 8
+			// Add remote_host_metrics table for Remote Host monitoring (ICMP, Port, Unix socket)
+			log.Printf("[INFO] Migrating from v7 to v8: Adding remote_host_metrics table")
+
+			// Create remote_host_metrics table
+			_, err := db.Exec(createRemoteHostMetricsTable)
+			if err != nil {
+				return fmt.Errorf("migration v7->v8 failed creating remote_host_metrics table: %w", err)
+			}
+
+			_, err = db.Exec(createRemoteHostMetricsIndex)
+			if err != nil {
+				return fmt.Errorf("migration v7->v8 failed creating remote_host_metrics index: %w", err)
+			}
+
+			fromVersion = 8
+			err = setSchemaVersion(db, fromVersion)
+			if err != nil {
+				return err
+			}
+			log.Printf("[INFO] Successfully migrated to schema version 8")
 
 		default:
 			return fmt.Errorf("no migration path from version %d", fromVersion)

@@ -740,6 +740,17 @@ func StoreMonitStatus(db *sql.DB, status *parser.MonitStatus) error {
 			if err != nil {
 				log.Printf("[WARN] Failed to store process metrics for %s: %v", service.Name, err)
 			}
+			// Process services can also have Port and Unix socket checks
+			err = StoreRemoteHostMetrics(db, hostID, service)
+			if err != nil {
+				log.Printf("[WARN] Failed to store remote host metrics for %s: %v", service.Name, err)
+			}
+
+		case 4: // Remote host service
+			err = StoreRemoteHostMetrics(db, hostID, service)
+			if err != nil {
+				log.Printf("[WARN] Failed to store remote host metrics for %s: %v", service.Name, err)
+			}
 
 		case 0: // Filesystem service
 			err = StoreFilesystemMetrics(db, hostID, service)
@@ -1128,6 +1139,151 @@ func StoreProgramMetrics(db *sql.DB, hostID string, service *parser.Service) err
 	return nil
 }
 
+// StoreRemoteHostMetrics stores remote host service metrics into the database.
+//
+// This function is called for remote host services (type 4) to record:
+// - ICMP ping response times
+// - TCP/UDP port connection response times
+// - Unix socket connection response times (for process services too)
+//
+// Parameters:
+//   - db: Database connection
+//   - hostID: Host identifier (from hosts table)
+//   - service: Parsed service data from Monit XML
+//
+// Returns:
+//   - error: nil if successful, error describing problem if failed
+func StoreRemoteHostMetrics(db *sql.DB, hostID string, service *parser.Service) error {
+	// Check if this is a remote host service (type 4) or process service (type 3)
+	// Remote host services (type 4) can have ICMP and Port metrics
+	// Process services (type 3) can have Port and Unix socket metrics
+	if service.Type != 4 && service.Type != 3 {
+		// Not a remote host or process service, nothing to do
+		return nil
+	}
+
+	// Check if any remote host metrics are present
+	if service.ICMP == nil && service.Port == nil && service.Unix == nil {
+		// No remote host metrics in this service
+		return nil
+	}
+
+	// Get the collection timestamp
+	collectedAt := service.GetCollectedTime()
+
+	// Helper function to handle nullable string
+	getStringPtr := func(s string) *string {
+		if s == "" {
+			return nil
+		}
+		return &s
+	}
+
+	// Helper function to handle nullable int
+	getIntPtr := func(i int) *int {
+		if i == 0 {
+			return nil
+		}
+		return &i
+	}
+
+	// Helper function to handle nullable float
+	getFloatPtr := func(f float64) *float64 {
+		if f == 0.0 {
+			return nil
+		}
+		return &f
+	}
+
+	// Prepare variables for INSERT
+	var icmpType *string
+	var icmpResponseTime *float64
+	var portHostname *string
+	var portNumber *int
+	var portProtocol *string
+	var portType *string
+	var portResponseTime *float64
+	var unixPath *string
+	var unixProtocol *string
+	var unixResponseTime *float64
+
+	// Extract ICMP metrics if present
+	if service.ICMP != nil {
+		icmpType = getStringPtr(service.ICMP.Type)
+		icmpResponseTime = getFloatPtr(service.ICMP.ResponseTime)
+	}
+
+	// Extract Port metrics if present
+	if service.Port != nil {
+		portHostname = getStringPtr(service.Port.Hostname)
+		portNumber = getIntPtr(service.Port.PortNumber)
+		portProtocol = getStringPtr(service.Port.Protocol)
+		portType = getStringPtr(service.Port.Type)
+		portResponseTime = getFloatPtr(service.Port.ResponseTime)
+	}
+
+	// Extract Unix socket metrics if present
+	if service.Unix != nil {
+		unixPath = getStringPtr(service.Unix.Path)
+		unixProtocol = getStringPtr(service.Unix.Protocol)
+		unixResponseTime = getFloatPtr(service.Unix.ResponseTime)
+	}
+
+	// Insert remote host metrics into the database
+	//
+	// Using INSERT (not INSERT OR REPLACE) because:
+	// - Each metric is a new data point in time
+	// - We want to keep all historical values for graphing
+	// - Time-series data is append-only
+	query := `
+		INSERT INTO remote_host_metrics (
+			host_id, service_name,
+			icmp_type, icmp_responsetime,
+			port_hostname, port_number, port_protocol, port_type, port_responsetime,
+			unix_path, unix_protocol, unix_responsetime,
+			collected_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`
+
+	_, err := db.Exec(query,
+		hostID,
+		service.Name,
+		icmpType,
+		icmpResponseTime,
+		portHostname,
+		portNumber,
+		portProtocol,
+		portType,
+		portResponseTime,
+		unixPath,
+		unixProtocol,
+		unixResponseTime,
+		collectedAt,
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to store remote host metrics: %w", err)
+	}
+
+	if debugMode {
+		// Build debug message showing which metrics were stored
+		var metricsDesc []string
+		if service.ICMP != nil {
+			metricsDesc = append(metricsDesc, fmt.Sprintf("ICMP %.3fms", service.ICMP.ResponseTime*1000))
+		}
+		if service.Port != nil {
+			metricsDesc = append(metricsDesc, fmt.Sprintf("Port %s:%d %.3fms", service.Port.Hostname, service.Port.PortNumber, service.Port.ResponseTime*1000))
+		}
+		if service.Unix != nil {
+			metricsDesc = append(metricsDesc, fmt.Sprintf("Unix %s %.3fms", service.Unix.Path, service.Unix.ResponseTime*1000))
+		}
+		log.Printf("[DEBUG] Stored remote host metrics for %s/%s (%s)",
+			hostID, service.Name, metricsDesc)
+	}
+
+	return nil
+}
+
 // DeleteHostStats contains statistics about what was deleted during host deletion
 type DeleteHostStats struct {
 	Services           int64 // Number of services deleted
@@ -1136,6 +1292,7 @@ type DeleteHostStats struct {
 	NetworkMetrics     int64 // Number of network metrics deleted
 	FileMetrics        int64 // Number of file metrics deleted
 	ProgramMetrics     int64 // Number of program metrics deleted
+	RemoteHostMetrics  int64 // Number of remote host metrics deleted
 	Events             int64 // Number of events deleted
 }
 
@@ -1148,6 +1305,7 @@ type DeleteHostStats struct {
 // - network_metrics
 // - file_metrics
 // - program_metrics
+// - remote_host_metrics
 // - events
 // - hosts
 //
@@ -1232,6 +1390,13 @@ func DeleteHost(db *sql.DB, hostID string) (*DeleteHostStats, error) {
 		return nil, fmt.Errorf("failed to delete program_metrics: %w", err)
 	}
 	stats.ProgramMetrics, _ = result.RowsAffected()
+
+	// Delete remote_host_metrics
+	result, err = tx.Exec("DELETE FROM remote_host_metrics WHERE host_id = ?", hostID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to delete remote_host_metrics: %w", err)
+	}
+	stats.RemoteHostMetrics, _ = result.RowsAffected()
 
 	// Delete events
 	result, err = tx.Exec("DELETE FROM events WHERE host_id = ?", hostID)

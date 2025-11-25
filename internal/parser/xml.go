@@ -317,6 +317,20 @@ type Service struct {
 	// Network fields (for type 8 - network interface services)
 	// Only present when Type == 8 (network interface)
 	Link     *NetworkLink              `xml:"link,omitempty"`
+
+	// Remote Host monitoring fields (for type 4 - remote host services)
+	// ICMP contains ping monitoring information
+	// Only present when Type == 4 (remote host) with ICMP checks
+	ICMP *ICMPInfo `xml:"icmp,omitempty"`
+
+	// Port contains TCP/UDP port monitoring information
+	// Present when Type == 4 (remote host) with port checks
+	// Also present when Type == 3 (process) with port checks
+	Port *PortInfo `xml:"port,omitempty"`
+
+	// Unix contains Unix domain socket monitoring information
+	// Only present when Type == 3 (process) with unix socket checks
+	Unix *UnixSocketInfo `xml:"unix,omitempty"`
 }
 
 // SystemMetrics contains system-level performance metrics.
@@ -577,6 +591,76 @@ type FileInfo struct {
 
 	// Checksum contains the file checksum and its type
 	Checksum FileChecksum `xml:"checksum"`
+}
+
+// ICMPInfo contains ICMP (ping) monitoring information.
+//
+// Only present for Remote Host services (type 4) with ICMP checks.
+//
+// Example XML:
+// <icmp>
+//   <type>echo</type>
+//   <responsetime>0.001</responsetime>
+// </icmp>
+type ICMPInfo struct {
+	// Type is the ICMP check type (usually "echo" for ping)
+	Type string `xml:"type"`
+
+	// ResponseTime is the ping response time in seconds
+	// Example: 0.001 = 1 millisecond
+	ResponseTime float64 `xml:"responsetime"`
+}
+
+// PortInfo contains TCP/UDP port monitoring information.
+//
+// Only present for Remote Host services (type 4) with port checks,
+// or Process services (type 3) with port checks.
+//
+// Example XML:
+// <port>
+//   <hostname>192.168.100.10</hostname>
+//   <portnumber>8123</portnumber>
+//   <request/>
+//   <protocol>HTTP</protocol>
+//   <type>TCP</type>
+//   <responsetime>0.002</responsetime>
+// </port>
+type PortInfo struct {
+	// Hostname is the target hostname or IP address
+	Hostname string `xml:"hostname"`
+
+	// PortNumber is the TCP/UDP port number
+	PortNumber int `xml:"portnumber"`
+
+	// Protocol is the application protocol (HTTP, HTTPS, etc.)
+	Protocol string `xml:"protocol"`
+
+	// Type is the transport protocol (TCP or UDP)
+	Type string `xml:"type"`
+
+	// ResponseTime is the port response time in seconds
+	ResponseTime float64 `xml:"responsetime"`
+}
+
+// UnixSocketInfo contains Unix domain socket monitoring information.
+//
+// Only present for Process services (type 3) with unix socket checks.
+//
+// Example XML:
+// <unix>
+//   <path>/var/run/syslog.sock</path>
+//   <protocol>DEFAULT</protocol>
+//   <responsetime>0.000</responsetime>
+// </unix>
+type UnixSocketInfo struct {
+	// Path is the filesystem path to the Unix socket
+	Path string `xml:"path"`
+
+	// Protocol is the socket protocol
+	Protocol string `xml:"protocol"`
+
+	// ResponseTime is the socket response time in seconds
+	ResponseTime float64 `xml:"responsetime"`
 }
 
 // FilesystemInfo contains filesystem-specific information.

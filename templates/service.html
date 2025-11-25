@@ -372,6 +372,88 @@
                 </div>
                 {{end}}
 
+                {{if .RemoteHostData}}
+                <!-- Remote Host Metrics -->
+                <div class="border-t pt-6">
+                    <h3 class="text-xl font-semibold mb-4">Remote Host Metrics</h3>
+
+                    {{if .RemoteHostData.ICMPType}}
+                    <!-- ICMP / Ping Monitoring -->
+                    <div class="mb-6">
+                        <h4 class="font-semibold mb-3 text-blue-700">ICMP Ping Monitor</h4>
+                        <div class="bg-blue-50 p-4 rounded">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <div class="text-xs text-gray-600 uppercase mb-1">Ping Type</div>
+                                    <div class="font-semibold">{{.RemoteHostData.ICMPType}}</div>
+                                </div>
+                                <div>
+                                    <div class="text-xs text-gray-600 uppercase mb-1">Response Time</div>
+                                    <div class="text-2xl font-bold {{if lt .RemoteHostData.ICMPResponseTimeMs 100}}text-green-600{{else if lt .RemoteHostData.ICMPResponseTimeMs 500}}text-yellow-600{{else}}text-red-600{{end}}">
+                                        {{printf "%.2f" .RemoteHostData.ICMPResponseTimeMs}} ms
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {{end}}
+
+                    {{if .RemoteHostData.PortHostname}}
+                    <!-- Port Monitoring -->
+                    <div class="mb-6">
+                        <h4 class="font-semibold mb-3 text-green-700">Port Monitor</h4>
+                        <div class="bg-green-50 p-4 rounded">
+                            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                <div>
+                                    <div class="text-xs text-gray-600 uppercase mb-1">Target Host</div>
+                                    <div class="font-semibold font-mono">{{.RemoteHostData.PortHostname}}</div>
+                                </div>
+                                <div>
+                                    <div class="text-xs text-gray-600 uppercase mb-1">Port</div>
+                                    <div class="font-semibold">{{.RemoteHostData.PortNumber}}</div>
+                                </div>
+                                <div>
+                                    <div class="text-xs text-gray-600 uppercase mb-1">Protocol</div>
+                                    <div class="font-semibold">{{.RemoteHostData.PortProtocol}} / {{.RemoteHostData.PortType}}</div>
+                                </div>
+                                <div>
+                                    <div class="text-xs text-gray-600 uppercase mb-1">Response Time</div>
+                                    <div class="text-2xl font-bold {{if lt .RemoteHostData.PortResponseTimeMs 100}}text-green-600{{else if lt .RemoteHostData.PortResponseTimeMs 500}}text-yellow-600{{else}}text-red-600{{end}}">
+                                        {{printf "%.2f" .RemoteHostData.PortResponseTimeMs}} ms
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {{end}}
+
+                    {{if .RemoteHostData.UnixPath}}
+                    <!-- Unix Socket Monitoring -->
+                    <div>
+                        <h4 class="font-semibold mb-3 text-purple-700">Unix Socket Monitor</h4>
+                        <div class="bg-purple-50 p-4 rounded">
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div>
+                                    <div class="text-xs text-gray-600 uppercase mb-1">Socket Path</div>
+                                    <div class="font-semibold font-mono text-sm break-all">{{.RemoteHostData.UnixPath}}</div>
+                                </div>
+                                <div>
+                                    <div class="text-xs text-gray-600 uppercase mb-1">Protocol</div>
+                                    <div class="font-semibold">{{.RemoteHostData.UnixProtocol}}</div>
+                                </div>
+                                <div>
+                                    <div class="text-xs text-gray-600 uppercase mb-1">Response Time</div>
+                                    <div class="text-2xl font-bold {{if lt .RemoteHostData.UnixResponseTimeMs 50}}text-green-600{{else if lt .RemoteHostData.UnixResponseTimeMs 200}}text-yellow-600{{else}}text-red-600{{end}}">
+                                        {{printf "%.2f" .RemoteHostData.UnixResponseTimeMs}} ms
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {{end}}
+                </div>
+                {{end}}
+
                 {{if .SystemData}}
                 <!-- System Metrics -->
                 <div class="border-t pt-6">

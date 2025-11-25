@@ -804,6 +804,28 @@ func handleCollector(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[INFO] Parsed status from %s: %d services",
 		status.Server.LocalHostname, len(status.Services))
 
+	// In debug mode, save the raw XML to /var/log for debugging
+	//
+	// This helps debug what data Monit is actually sending
+	// Useful for:
+	// - Verifying XML structure
+	// - Checking if expected fields are present
+	// - Troubleshooting parser issues
+	if debugEnabled {
+		// Create a safe filename from the hostname
+		// Replace any characters that might cause filesystem issues
+		safeHostname := status.Server.LocalHostname
+		// In production, you might want to add more sanitization
+
+		xmlFilePath := fmt.Sprintf("/tmp/cmonit.%s.xml", safeHostname)
+		err := os.WriteFile(xmlFilePath, body, 0644)
+		if err != nil {
+			log.Printf("[WARN] Failed to write debug XML to %s: %v", xmlFilePath, err)
+		} else {
+			log.Printf("[DEBUG] Saved XML to %s", xmlFilePath)
+		}
+	}
+
 	// Store everything in the database
 	//
 	// db.StoreMonitStatus() does:

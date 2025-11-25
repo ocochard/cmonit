@@ -636,6 +636,15 @@ func getServiceDetailData(hostID, serviceName string) (*ServiceDetailData, error
 		}
 	}
 
+	// Get remote host metrics if this is a process service (type 3) or remote host service (type 4)
+	// Process services can have port/unix socket monitoring, Remote Host services can have ICMP/port/unix socket monitoring
+	if svc.Type == 3 || svc.Type == 4 {
+		data.RemoteHostData, err = getRemoteHostMetrics(hostID, serviceName)
+		if err != nil {
+			log.Printf("[WARN] Failed to get remote host metrics for %s/%s: %v", hostID, serviceName, err)
+		}
+	}
+
 	return data, nil
 }
 
@@ -939,4 +948,78 @@ func getSystemMetricsForService(hostID, serviceName string) (*SystemMetrics, err
 	}
 
 	return sm, nil
+}
+
+// getRemoteHostMetrics retrieves the latest remote host metrics for a service.
+func getRemoteHostMetrics(hostID, serviceName string) (*RemoteHostMetrics, error) {
+	const query = `
+		SELECT icmp_type, icmp_responsetime,
+		       port_hostname, port_number, port_protocol, port_type, port_responsetime,
+		       unix_path, unix_protocol, unix_responsetime
+		FROM remote_host_metrics
+		WHERE host_id = ? AND service_name = ?
+		ORDER BY collected_at DESC
+		LIMIT 1
+	`
+
+	var rhm RemoteHostMetrics
+	var icmpType, portHostname, portProtocol, portType, unixPath, unixProtocol sql.NullString
+	var portNumber sql.NullInt64
+	var icmpResponsetime, portResponsetime, unixResponsetime sql.NullFloat64
+
+	err := db.QueryRow(query, hostID, serviceName).Scan(
+		&icmpType,
+		&icmpResponsetime,
+		&portHostname,
+		&portNumber,
+		&portProtocol,
+		&portType,
+		&portResponsetime,
+		&unixPath,
+		&unixProtocol,
+		&unixResponsetime,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			// No metrics found is not an error - return nil
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	// Convert nullable fields and response times from seconds to milliseconds
+	if icmpType.Valid {
+		rhm.ICMPType = icmpType.String
+	}
+	if icmpResponsetime.Valid {
+		rhm.ICMPResponseTimeMs = icmpResponsetime.Float64 * 1000
+	}
+
+	if portHostname.Valid {
+		rhm.PortHostname = portHostname.String
+	}
+	if portNumber.Valid {
+		rhm.PortNumber = int(portNumber.Int64)
+	}
+	if portProtocol.Valid {
+		rhm.PortProtocol = portProtocol.String
+	}
+	if portType.Valid {
+		rhm.PortType = portType.String
+	}
+	if portResponsetime.Valid {
+		rhm.PortResponseTimeMs = portResponsetime.Float64 * 1000
+	}
+
+	if unixPath.Valid {
+		rhm.UnixPath = unixPath.String
+	}
+	if unixProtocol.Valid {
+		rhm.UnixProtocol = unixProtocol.String
+	}
+	if unixResponsetime.Valid {
+		rhm.UnixResponseTimeMs = unixResponsetime.Float64 * 1000
+	}
+
+	return &rhm, nil
 }

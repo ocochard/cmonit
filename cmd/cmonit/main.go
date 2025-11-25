@@ -393,6 +393,10 @@ func main() {
 	// Used by action buttons on the dashboard
 	webMux.HandleFunc("/api/action", web.HandleActionAPI)
 
+	// /api/remote-metrics returns JSON with response time data for remote host services
+	// Used by Chart.js to draw response time graphs on remote host service detail pages
+	webMux.HandleFunc("/api/remote-metrics", web.HandleRemoteHostMetricsAPI)
+
 	// M/Monit-compatible API endpoints
 	//
 	// These endpoints provide M/Monit HTTP API compatibility

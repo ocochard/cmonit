@@ -585,3 +585,198 @@ func respondJSON(w http.ResponseWriter, data interface{}, statusCode int) {
 		log.Printf("[ERROR] Failed to encode JSON response: %v", err)
 	}
 }
+
+// =============================================================================
+// REMOTE HOST METRICS API
+// =============================================================================
+
+// HandleRemoteHostMetricsAPI serves response time metrics for remote host services.
+//
+// URL format:
+//   /api/remote-metrics?host_id=xxx&service=xxx&range=1h
+//
+// Query parameters:
+//   - host_id (required): Host identifier
+//   - service (required): Service name
+//   - range (optional): Time range (1h, 6h, 24h, 7d, 30d), default: 24h
+//
+// Returns JSON with timestamps and response time values (ICMP ping and port checks).
+func HandleRemoteHostMetricsAPI(w http.ResponseWriter, r *http.Request) {
+	// Only allow GET requests
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse query parameters
+	query := r.URL.Query()
+	hostID := query.Get("host_id")
+	service := query.Get("service")
+	rangeStr := query.Get("range")
+
+	// Validate required parameters
+	if hostID == "" {
+		http.Error(w, "Missing host_id parameter", http.StatusBadRequest)
+		return
+	}
+	if service == "" {
+		http.Error(w, "Missing service parameter", http.StatusBadRequest)
+		return
+	}
+
+	// Default to 24 hours if range not specified
+	if rangeStr == "" {
+		rangeStr = "24h"
+	}
+
+	// Parse time range
+	duration, err := parseTimeRange(rangeStr)
+	if err != nil {
+		http.Error(w, "Invalid range parameter", http.StatusBadRequest)
+		return
+	}
+
+	// Calculate time window
+	endTime := time.Now()
+	startTime := endTime.Add(-duration)
+
+	// Query remote host metrics from database
+	metrics, err := getRemoteHostMetricsForGraph(hostID, service, startTime, endTime)
+	if err != nil {
+		log.Printf("[ERROR] Failed to get remote host metrics: %v", err)
+		http.Error(w, "Failed to get metrics", http.StatusInternalServerError)
+		return
+	}
+
+	// Get hostname for the response
+	hostname, err := getHostname(hostID)
+	if err != nil {
+		log.Printf("[ERROR] Failed to get hostname: %v", err)
+		hostname = hostID
+	}
+
+	// Build JSON response
+	response := MetricsResponse{
+		HostID:    hostID,
+		Hostname:  hostname,
+		Service:   service,
+		StartTime: startTime,
+		EndTime:   endTime,
+		Metrics:   metrics,
+	}
+
+	// Set response headers for JSON
+	w.Header().Set("Content-Type", "application/json")
+
+	// Encode response as JSON and write to client
+	err = json.NewEncoder(w).Encode(response)
+	if err != nil {
+		log.Printf("[ERROR] Failed to encode JSON: %v", err)
+	}
+}
+
+// getRemoteHostMetricsForGraph queries response time metrics for a remote host service over a time range.
+// This is used for graphing historical data. Do not confuse with getRemoteHostMetrics in handlers_status.go
+// which gets only the latest metrics for display on the service detail page.
+//
+// Parameters:
+//   - hostID: The host identifier
+//   - service: The service name
+//   - startTime: Start of time range
+//   - endTime: End of time range
+//
+// Returns:
+//   - []MetricSeries: Array of metric series (ICMP and Port response times)
+//   - error: Any database error
+func getRemoteHostMetricsForGraph(hostID, service string, startTime, endTime time.Time) ([]MetricSeries, error) {
+	// Query remote host metrics for this service in the time range
+	// We'll get ICMP response times and Port response times
+	const query = `
+		SELECT collected_at, icmp_responsetime, port_responsetime
+		FROM remote_host_metrics
+		WHERE host_id = ? AND service_name = ?
+		  AND collected_at BETWEEN ? AND ?
+		ORDER BY collected_at
+	`
+
+	rows, err := db.Query(query, hostID, service, startTime, endTime)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	// Collect data points
+	var icmpPoints []MetricPoint
+	var portPoints []MetricPoint
+
+	for rows.Next() {
+		var collectedAt time.Time
+		var icmpResponse, portResponse *float64
+
+		err := rows.Scan(&collectedAt, &icmpResponse, &portResponse)
+		if err != nil {
+			return nil, err
+		}
+
+		// Add ICMP response time if available (convert to milliseconds)
+		if icmpResponse != nil && *icmpResponse > 0 {
+			icmpPoints = append(icmpPoints, MetricPoint{
+				Timestamp: collectedAt,
+				Value:     *icmpResponse * 1000, // Convert seconds to milliseconds
+			})
+		}
+
+		// Add Port response time if available (convert to milliseconds)
+		if portResponse != nil && *portResponse > 0 {
+			portPoints = append(portPoints, MetricPoint{
+				Timestamp: collectedAt,
+				Value:     *portResponse * 1000, // Convert seconds to milliseconds
+			})
+		}
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Build metric series
+	var result []MetricSeries
+
+	// Add ICMP series if we have data
+	if len(icmpPoints) > 0 {
+		timestamps := make([]string, len(icmpPoints))
+		values := make([]float64, len(icmpPoints))
+
+		for i, point := range icmpPoints {
+			timestamps[i] = point.Timestamp.Format(time.RFC3339)
+			values[i] = point.Value
+		}
+
+		result = append(result, MetricSeries{
+			Name:       "icmp_response_time",
+			Type:       "response_time",
+			Timestamps: timestamps,
+			Values:     values,
+		})
+	}
+
+	// Add Port series if we have data
+	if len(portPoints) > 0 {
+		timestamps := make([]string, len(portPoints))
+		values := make([]float64, len(portPoints))
+
+		for i, point := range portPoints {
+			timestamps[i] = point.Timestamp.Format(time.RFC3339)
+			values[i] = point.Value
+		}
+
+		result = append(result, MetricSeries{
+			Name:       "port_response_time",
+			Type:       "response_time",
+			Timestamps: timestamps,
+			Values:     values,
+		})
+	}
+
+	return result, nil
+}

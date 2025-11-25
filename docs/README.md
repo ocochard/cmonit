@@ -44,6 +44,66 @@ All planned phases have been successfully completed:
 - **Chart.js** - Time-series visualization (CDN)
 - **Server-side rendering** - Go templates, no build step
 
+### Data Flow Diagram
+
+The following diagram shows how data flows from Monit agents through cmonit to the web interface, with actual function names from the codebase:
+
+```mermaid
+flowchart TB
+    Agent[Monit Agent] -->|HTTP POST XML| Collector["/collector endpoint<br/>handleCollector"]
+
+    Collector -->|XML bytes| Parser["parser.Parse()<br/>internal/parser/xml.go"]
+    Parser -->|MonitStatus struct| Storage["Storage Layer<br/>internal/db/storage.go"]
+
+    Storage -->|"db.StoreHost()"| DB1[(SQLite DB<br/>hosts table)]
+    Storage -->|"db.StoreService()"| DB2[(SQLite DB<br/>services table)]
+    Storage -->|"db.StoreMetrics()"| DB3[(SQLite DB<br/>metrics tables)]
+
+    DB1 --> Query["Web Handlers<br/>internal/web/*.go"]
+    DB2 --> Query
+    DB3 --> Query
+
+    Query -->|"web.HandleStatus()"| Dashboard["Dashboard Template<br/>templates/dashboard.html"]
+    Query -->|"web.HandleServiceDetail()"| Service["Service Detail Template<br/>templates/service.html"]
+
+    Dashboard -->|Rendered HTML| Browser[User Browser]
+    Service -->|Rendered HTML| Browser
+
+    Browser -->|View Dashboard| Dashboard
+    Browser -->|View Service Details| Service
+
+    style Agent fill:#e1f5ff
+    style Collector fill:#ffe1e1
+    style Parser fill:#fff4e1
+    style Storage fill:#fff4e1
+    style DB1 fill:#e1ffe1
+    style DB2 fill:#e1ffe1
+    style DB3 fill:#e1ffe1
+    style Query fill:#f4e1ff
+    style Dashboard fill:#ffe1f4
+    style Service fill:#ffe1f4
+    style Browser fill:#e1f5ff
+```
+
+**Key Data Flow Steps:**
+
+1. **Collection** - Monit agent sends XML status via HTTP POST to `:8080/collector`
+2. **Authentication** - `handleCollector()` validates HTTP Basic Auth (monit:monit)
+3. **Parsing** - `parser.Parse()` converts XML to Go structs using `encoding/xml`
+4. **Storage** - Database functions store parsed data:
+   - `StoreHost()` - Host information and platform details
+   - `StoreService()` - Service status and monitoring state
+   - `StoreMetrics()` - Time-series metrics (CPU, memory, disk, network, etc.)
+5. **Query** - Web handlers query database when users visit dashboard
+6. **Rendering** - Go templates generate HTML with Tailwind CSS styling
+7. **Display** - Browser renders the responsive web interface
+
+**Separation of Concerns:**
+- **Collector** (port 8080) - Receives data from Monit agents
+- **Web UI** (port 3000) - Serves dashboard to users
+- **Database** - Central storage with automatic schema migrations
+- **Templates** - Server-side rendering with no JavaScript build step
+
 ### Project Structure
 
 ```

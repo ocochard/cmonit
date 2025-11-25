@@ -406,7 +406,6 @@
                     <div class="mb-6">
                         <h4 class="font-semibold mb-3">CPU Usage Breakdown</h4>
                         <div class="space-y-3">
-                            {{if .SystemData.CPUUser}}
                             <div>
                                 <div class="flex justify-between text-sm mb-1">
                                     <span class="text-gray-600">User</span>
@@ -416,9 +415,7 @@
                                     <div class="bg-blue-500 h-full" style="width: {{.SystemData.CPUUser}}%"></div>
                                 </div>
                             </div>
-                            {{end}}
 
-                            {{if .SystemData.CPUSystem}}
                             <div>
                                 <div class="flex justify-between text-sm mb-1">
                                     <span class="text-gray-600">System</span>
@@ -428,9 +425,7 @@
                                     <div class="bg-red-500 h-full" style="width: {{.SystemData.CPUSystem}}%"></div>
                                 </div>
                             </div>
-                            {{end}}
 
-                            {{if .SystemData.CPUNice}}
                             <div>
                                 <div class="flex justify-between text-sm mb-1">
                                     <span class="text-gray-600">Nice</span>
@@ -440,9 +435,7 @@
                                     <div class="bg-green-500 h-full" style="width: {{.SystemData.CPUNice}}%"></div>
                                 </div>
                             </div>
-                            {{end}}
 
-                            {{if .SystemData.CPUWait}}
                             <div>
                                 <div class="flex justify-between text-sm mb-1">
                                     <span class="text-gray-600">I/O Wait</span>
@@ -452,9 +445,9 @@
                                     <div class="bg-yellow-500 h-full" style="width: {{.SystemData.CPUWait}}%"></div>
                                 </div>
                             </div>
-                            {{end}}
 
-                            {{if .SystemData.CPUHardIRQ}}
+                            {{if or (ne .SystemData.CPUHardIRQ 0.0) (ne .SystemData.CPUSoftIRQ 0.0) (ne .SystemData.CPUSteal 0.0) (ne .SystemData.CPUGuest 0.0) (ne .SystemData.CPUGuestNice 0.0)}}
+                            <!-- Extended Linux CPU Metrics (only shown if any extended metric is non-zero) -->
                             <div>
                                 <div class="flex justify-between text-sm mb-1">
                                     <span class="text-gray-600">Hard IRQ</span>
@@ -464,9 +457,7 @@
                                     <div class="bg-purple-500 h-full" style="width: {{.SystemData.CPUHardIRQ}}%"></div>
                                 </div>
                             </div>
-                            {{end}}
 
-                            {{if .SystemData.CPUSoftIRQ}}
                             <div>
                                 <div class="flex justify-between text-sm mb-1">
                                     <span class="text-gray-600">Soft IRQ</span>
@@ -476,9 +467,7 @@
                                     <div class="bg-pink-500 h-full" style="width: {{.SystemData.CPUSoftIRQ}}%"></div>
                                 </div>
                             </div>
-                            {{end}}
 
-                            {{if .SystemData.CPUSteal}}
                             <div>
                                 <div class="flex justify-between text-sm mb-1">
                                     <span class="text-gray-600">Steal</span>
@@ -488,9 +477,7 @@
                                     <div class="bg-orange-500 h-full" style="width: {{.SystemData.CPUSteal}}%"></div>
                                 </div>
                             </div>
-                            {{end}}
 
-                            {{if .SystemData.CPUGuest}}
                             <div>
                                 <div class="flex justify-between text-sm mb-1">
                                     <span class="text-gray-600">Guest</span>
@@ -500,9 +487,7 @@
                                     <div class="bg-indigo-500 h-full" style="width: {{.SystemData.CPUGuest}}%"></div>
                                 </div>
                             </div>
-                            {{end}}
 
-                            {{if .SystemData.CPUGuestNice}}
                             <div>
                                 <div class="flex justify-between text-sm mb-1">
                                     <span class="text-gray-600">Guest Nice</span>

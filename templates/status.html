@@ -16,6 +16,26 @@
         .status-orange { background-color: #f97316; }
         .status-red { background-color: #ef4444; }
         .status-gray { background-color: #6b7280; }
+
+        /* Sortable table headers */
+        .sortable {
+            cursor: pointer;
+            user-select: none;
+            position: relative;
+            padding-right: 20px !important;
+        }
+        .sortable:hover {
+            background-color: #e5e7eb;
+        }
+        .sort-indicator {
+            display: inline-block;
+            margin-left: 6px;
+            font-size: 10px;
+            color: #9ca3af;
+        }
+        .sort-indicator.active {
+            color: #3b82f6;
+        }
     </style>
 </head>
 <body class="bg-gray-50">
@@ -32,36 +52,36 @@
             <table class="min-w-full divide-y divide-gray-200">
                 <thead class="bg-gray-50">
                     <tr>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Status
+                        <th scope="col" class="sortable px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" onclick="sortTable(0, 'status')">
+                            Status<span class="sort-indicator" data-col="0">▲▼</span>
                         </th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Host
+                        <th scope="col" class="sortable px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" onclick="sortTable(1, 'string')">
+                            Host<span class="sort-indicator active" data-col="1">▲</span>
                         </th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            % CPU
+                        <th scope="col" class="sortable px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" onclick="sortTable(2, 'number')">
+                            % CPU<span class="sort-indicator" data-col="2">▲▼</span>
                         </th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            % Memory
+                        <th scope="col" class="sortable px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" onclick="sortTable(3, 'number')">
+                            % Memory<span class="sort-indicator" data-col="3">▲▼</span>
                         </th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Status Description
+                        <th scope="col" class="sortable px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" onclick="sortTable(4, 'services')">
+                            Status Description<span class="sort-indicator" data-col="4">▲▼</span>
                         </th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Events
+                        <th scope="col" class="sortable px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" onclick="sortTable(5, 'number')">
+                            Events<span class="sort-indicator" data-col="5">▲▼</span>
                         </th>
                     </tr>
                 </thead>
-                <tbody class="bg-white divide-y divide-gray-200">
+                <tbody class="bg-white divide-y divide-gray-200" id="hostsTableBody">
                     {{range .Hosts}}
                     <tr class="hover:bg-gray-50">
                         <!-- Status Icon -->
-                        <td class="px-6 py-4 whitespace-nowrap">
+                        <td class="px-6 py-4 whitespace-nowrap" data-status="{{.StatusColor}}">
                             <span class="status-icon status-{{.StatusColor}}" title="{{.StatusName}}"></span>
                         </td>
 
                         <!-- Host (Clickable Link) -->
-                        <td class="px-6 py-4 whitespace-nowrap">
+                        <td class="px-6 py-4 whitespace-nowrap" data-host="{{.Hostname}}">
                             <a href="/host/{{.ID}}" class="text-blue-600 hover:text-blue-800 hover:underline font-medium">
                                 {{.Hostname}}
                             </a>
@@ -73,7 +93,7 @@
                         </td>
 
                         <!-- CPU % -->
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900" data-cpu="{{if .CPUPercent}}{{deref .CPUPercent}}{{else}}-1{{end}}">
                             {{if .CPUPercent}}
                                 {{printf "%.1f%%" (deref .CPUPercent)}}
                             {{else}}
@@ -82,7 +102,7 @@
                         </td>
 
                         <!-- Memory % -->
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900" data-memory="{{if .MemoryPercent}}{{deref .MemoryPercent}}{{else}}-1{{end}}">
                             {{if .MemoryPercent}}
                                 {{printf "%.1f%%" (deref .MemoryPercent)}}
                             {{else}}
@@ -91,12 +111,12 @@
                         </td>
 
                         <!-- Status Description -->
-                        <td class="px-6 py-4 text-sm text-gray-900">
+                        <td class="px-6 py-4 text-sm text-gray-900" data-services="{{.StatusDescription}}">
                             {{.StatusDescription}}
                         </td>
 
                         <!-- Events (Clickable Link) -->
-                        <td class="px-6 py-4 whitespace-nowrap text-sm">
+                        <td class="px-6 py-4 whitespace-nowrap text-sm" data-events="{{.EventCount}}">
                             {{if gt .EventCount 0}}
                                 <a href="/host/{{.ID}}/events" class="text-blue-600 hover:text-blue-800 hover:underline">
                                     {{.EventCount}} event{{if ne .EventCount 1}}s{{end}}
@@ -118,8 +138,94 @@
         </div>
         {{end}}
 
-        <!-- Auto-refresh Script -->
+        <!-- Sorting and Auto-refresh Script -->
         <script>
+            let currentSort = { column: 1, direction: 'asc' }; // Default: Host column, ascending
+
+            function sortTable(columnIndex, type) {
+                const tbody = document.getElementById('hostsTableBody');
+                const rows = Array.from(tbody.getElementsByTagName('tr'));
+
+                // Toggle sort direction if clicking the same column
+                if (currentSort.column === columnIndex) {
+                    currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+                } else {
+                    currentSort.column = columnIndex;
+                    currentSort.direction = 'asc';
+                }
+
+                // Get sort value from cell
+                function getSortValue(row, colIndex, sortType) {
+                    const cell = row.cells[colIndex];
+
+                    switch(sortType) {
+                        case 'status':
+                            // Status order: green (0) < orange (1) < red (2) < gray (3)
+                            const statusMap = { 'green': 0, 'orange': 1, 'red': 2, 'gray': 3 };
+                            return statusMap[cell.dataset.status] || 999;
+
+                        case 'string':
+                            return (cell.dataset.host || '').toLowerCase();
+
+                        case 'number':
+                            const attr = ['data-status', 'data-host', 'data-cpu', 'data-memory', 'data-services', 'data-events'][colIndex];
+                            const val = parseFloat(cell.getAttribute(attr));
+                            return isNaN(val) ? -999 : val;
+
+                        case 'services':
+                            // Extract number from "X services up, Y services down"
+                            const text = cell.dataset.services || '';
+                            const upMatch = text.match(/(\d+)\s+services?\s+up/i);
+                            const downMatch = text.match(/(\d+)\s+services?\s+down/i);
+                            const up = upMatch ? parseInt(upMatch[1]) : 0;
+                            const down = downMatch ? parseInt(downMatch[1]) : 0;
+                            // Sort by: down count (higher first), then up count (higher first)
+                            return down * 10000 + up;
+
+                        default:
+                            return cell.textContent.trim().toLowerCase();
+                    }
+                }
+
+                // Sort rows
+                rows.sort((a, b) => {
+                    const aVal = getSortValue(a, columnIndex, type);
+                    const bVal = getSortValue(b, columnIndex, type);
+
+                    let comparison = 0;
+                    if (aVal < bVal) comparison = -1;
+                    if (aVal > bVal) comparison = 1;
+
+                    return currentSort.direction === 'asc' ? comparison : -comparison;
+                });
+
+                // Re-append rows in sorted order
+                rows.forEach(row => tbody.appendChild(row));
+
+                // Update sort indicators
+                updateSortIndicators(columnIndex, currentSort.direction);
+            }
+
+            function updateSortIndicators(activeCol, direction) {
+                // Reset all indicators
+                document.querySelectorAll('.sort-indicator').forEach((indicator, index) => {
+                    indicator.classList.remove('active');
+                    indicator.textContent = '▲▼';
+                });
+
+                // Set active indicator
+                const activeIndicator = document.querySelector(`.sort-indicator[data-col="${activeCol}"]`);
+                if (activeIndicator) {
+                    activeIndicator.classList.add('active');
+                    activeIndicator.textContent = direction === 'asc' ? '▲' : '▼';
+                }
+            }
+
+            // Apply default sort on page load
+            window.addEventListener('DOMContentLoaded', function() {
+                sortTable(1, 'string'); // Sort by Host column (alphanumeric)
+            });
+
             // Auto-refresh page every 60 seconds
             setInterval(function() {
                 window.location.reload();

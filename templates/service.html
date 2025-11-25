@@ -372,6 +372,232 @@
                 </div>
                 {{end}}
 
+                {{if .SystemData}}
+                <!-- System Metrics -->
+                <div class="border-t pt-6">
+                    <h3 class="text-xl font-semibold mb-4">System Metrics</h3>
+
+                    <!-- Load Average -->
+                    <div class="mb-6">
+                        <h4 class="font-semibold mb-3">Load Average</h4>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div class="bg-gray-50 p-4 rounded">
+                                <div class="text-xs text-gray-500 uppercase mb-1">1 Minute</div>
+                                <div class="text-2xl font-bold text-gray-900">
+                                    {{if .SystemData.Load1Min}}{{printf "%.2f" .SystemData.Load1Min}}{{else}}N/A{{end}}
+                                </div>
+                            </div>
+                            <div class="bg-gray-50 p-4 rounded">
+                                <div class="text-xs text-gray-500 uppercase mb-1">5 Minutes</div>
+                                <div class="text-2xl font-bold text-gray-900">
+                                    {{if .SystemData.Load5Min}}{{printf "%.2f" .SystemData.Load5Min}}{{else}}N/A{{end}}
+                                </div>
+                            </div>
+                            <div class="bg-gray-50 p-4 rounded">
+                                <div class="text-xs text-gray-500 uppercase mb-1">15 Minutes</div>
+                                <div class="text-2xl font-bold text-gray-900">
+                                    {{if .SystemData.Load15Min}}{{printf "%.2f" .SystemData.Load15Min}}{{else}}N/A{{end}}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- CPU Usage Breakdown -->
+                    <div class="mb-6">
+                        <h4 class="font-semibold mb-3">CPU Usage Breakdown</h4>
+                        <div class="space-y-3">
+                            {{if .SystemData.CPUUser}}
+                            <div>
+                                <div class="flex justify-between text-sm mb-1">
+                                    <span class="text-gray-600">User</span>
+                                    <span class="font-semibold">{{printf "%.1f%%" .SystemData.CPUUser}}</span>
+                                </div>
+                                <div class="bg-gray-200 rounded-full h-4 overflow-hidden">
+                                    <div class="bg-blue-500 h-full" style="width: {{.SystemData.CPUUser}}%"></div>
+                                </div>
+                            </div>
+                            {{end}}
+
+                            {{if .SystemData.CPUSystem}}
+                            <div>
+                                <div class="flex justify-between text-sm mb-1">
+                                    <span class="text-gray-600">System</span>
+                                    <span class="font-semibold">{{printf "%.1f%%" .SystemData.CPUSystem}}</span>
+                                </div>
+                                <div class="bg-gray-200 rounded-full h-4 overflow-hidden">
+                                    <div class="bg-red-500 h-full" style="width: {{.SystemData.CPUSystem}}%"></div>
+                                </div>
+                            </div>
+                            {{end}}
+
+                            {{if .SystemData.CPUNice}}
+                            <div>
+                                <div class="flex justify-between text-sm mb-1">
+                                    <span class="text-gray-600">Nice</span>
+                                    <span class="font-semibold">{{printf "%.1f%%" .SystemData.CPUNice}}</span>
+                                </div>
+                                <div class="bg-gray-200 rounded-full h-4 overflow-hidden">
+                                    <div class="bg-green-500 h-full" style="width: {{.SystemData.CPUNice}}%"></div>
+                                </div>
+                            </div>
+                            {{end}}
+
+                            {{if .SystemData.CPUWait}}
+                            <div>
+                                <div class="flex justify-between text-sm mb-1">
+                                    <span class="text-gray-600">I/O Wait</span>
+                                    <span class="font-semibold">{{printf "%.1f%%" .SystemData.CPUWait}}</span>
+                                </div>
+                                <div class="bg-gray-200 rounded-full h-4 overflow-hidden">
+                                    <div class="bg-yellow-500 h-full" style="width: {{.SystemData.CPUWait}}%"></div>
+                                </div>
+                            </div>
+                            {{end}}
+
+                            {{if .SystemData.CPUHardIRQ}}
+                            <div>
+                                <div class="flex justify-between text-sm mb-1">
+                                    <span class="text-gray-600">Hard IRQ</span>
+                                    <span class="font-semibold">{{printf "%.1f%%" .SystemData.CPUHardIRQ}}</span>
+                                </div>
+                                <div class="bg-gray-200 rounded-full h-4 overflow-hidden">
+                                    <div class="bg-purple-500 h-full" style="width: {{.SystemData.CPUHardIRQ}}%"></div>
+                                </div>
+                            </div>
+                            {{end}}
+
+                            {{if .SystemData.CPUSoftIRQ}}
+                            <div>
+                                <div class="flex justify-between text-sm mb-1">
+                                    <span class="text-gray-600">Soft IRQ</span>
+                                    <span class="font-semibold">{{printf "%.1f%%" .SystemData.CPUSoftIRQ}}</span>
+                                </div>
+                                <div class="bg-gray-200 rounded-full h-4 overflow-hidden">
+                                    <div class="bg-pink-500 h-full" style="width: {{.SystemData.CPUSoftIRQ}}%"></div>
+                                </div>
+                            </div>
+                            {{end}}
+
+                            {{if .SystemData.CPUSteal}}
+                            <div>
+                                <div class="flex justify-between text-sm mb-1">
+                                    <span class="text-gray-600">Steal</span>
+                                    <span class="font-semibold">{{printf "%.1f%%" .SystemData.CPUSteal}}</span>
+                                </div>
+                                <div class="bg-gray-200 rounded-full h-4 overflow-hidden">
+                                    <div class="bg-orange-500 h-full" style="width: {{.SystemData.CPUSteal}}%"></div>
+                                </div>
+                            </div>
+                            {{end}}
+
+                            {{if .SystemData.CPUGuest}}
+                            <div>
+                                <div class="flex justify-between text-sm mb-1">
+                                    <span class="text-gray-600">Guest</span>
+                                    <span class="font-semibold">{{printf "%.1f%%" .SystemData.CPUGuest}}</span>
+                                </div>
+                                <div class="bg-gray-200 rounded-full h-4 overflow-hidden">
+                                    <div class="bg-indigo-500 h-full" style="width: {{.SystemData.CPUGuest}}%"></div>
+                                </div>
+                            </div>
+                            {{end}}
+
+                            {{if .SystemData.CPUGuestNice}}
+                            <div>
+                                <div class="flex justify-between text-sm mb-1">
+                                    <span class="text-gray-600">Guest Nice</span>
+                                    <span class="font-semibold">{{printf "%.1f%%" .SystemData.CPUGuestNice}}</span>
+                                </div>
+                                <div class="bg-gray-200 rounded-full h-4 overflow-hidden">
+                                    <div class="bg-teal-500 h-full" style="width: {{.SystemData.CPUGuestNice}}%"></div>
+                                </div>
+                            </div>
+                            {{end}}
+                        </div>
+                    </div>
+
+                    <!-- Memory Usage -->
+                    <div class="mb-6">
+                        <h4 class="font-semibold mb-3">Memory Usage</h4>
+                        <div class="bg-gray-200 rounded-full h-6 overflow-hidden mb-2">
+                            {{if .SystemData.MemoryPercent}}
+                            <div class="{{if lt .SystemData.MemoryPercent 80.0}}bg-green-500{{else if lt .SystemData.MemoryPercent 90.0}}bg-yellow-500{{else}}bg-red-500{{end}} h-full flex items-center justify-center text-white text-sm font-semibold" style="width: {{.SystemData.MemoryPercent}}%">
+                                {{printf "%.1f%%" .SystemData.MemoryPercent}}
+                            </div>
+                            {{else}}
+                            <div class="bg-gray-400 h-full flex items-center justify-center text-white text-sm font-semibold" style="width: 0%">
+                                N/A
+                            </div>
+                            {{end}}
+                        </div>
+                        <div class="grid grid-cols-2 gap-4 text-sm">
+                            <div class="bg-gray-50 p-3 rounded">
+                                <span class="text-gray-500 block mb-1">Used</span>
+                                <span class="font-semibold text-lg">
+                                    {{if .SystemData.MemoryKB}}
+                                        {{if ge .SystemData.MemoryKB 1073741824}}
+                                            {{printf "%.2f GB" (divf .SystemData.MemoryKB 1073741824)}}
+                                        {{else if ge .SystemData.MemoryKB 1048576}}
+                                            {{printf "%.2f MB" (divf .SystemData.MemoryKB 1048576)}}
+                                        {{else}}
+                                            {{printf "%.2f KB" .SystemData.MemoryKB}}
+                                        {{end}}
+                                    {{else}}
+                                        N/A
+                                    {{end}}
+                                </span>
+                            </div>
+                            <div class="bg-gray-50 p-3 rounded">
+                                <span class="text-gray-500 block mb-1">Percentage</span>
+                                <span class="font-semibold text-lg">
+                                    {{if .SystemData.MemoryPercent}}{{printf "%.1f%%" .SystemData.MemoryPercent}}{{else}}N/A{{end}}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Swap Usage -->
+                    <div>
+                        <h4 class="font-semibold mb-3">Swap Usage</h4>
+                        <div class="bg-gray-200 rounded-full h-6 overflow-hidden mb-2">
+                            {{if .SystemData.SwapPercent}}
+                            <div class="{{if lt .SystemData.SwapPercent 50.0}}bg-green-500{{else if lt .SystemData.SwapPercent 80.0}}bg-yellow-500{{else}}bg-red-500{{end}} h-full flex items-center justify-center text-white text-sm font-semibold" style="width: {{.SystemData.SwapPercent}}%">
+                                {{printf "%.1f%%" .SystemData.SwapPercent}}
+                            </div>
+                            {{else}}
+                            <div class="bg-gray-400 h-full flex items-center justify-center text-white text-sm font-semibold" style="width: 0%">
+                                N/A
+                            </div>
+                            {{end}}
+                        </div>
+                        <div class="grid grid-cols-2 gap-4 text-sm">
+                            <div class="bg-gray-50 p-3 rounded">
+                                <span class="text-gray-500 block mb-1">Used</span>
+                                <span class="font-semibold text-lg">
+                                    {{if .SystemData.SwapKB}}
+                                        {{if ge .SystemData.SwapKB 1073741824}}
+                                            {{printf "%.2f GB" (divf .SystemData.SwapKB 1073741824)}}
+                                        {{else if ge .SystemData.SwapKB 1048576}}
+                                            {{printf "%.2f MB" (divf .SystemData.SwapKB 1048576)}}
+                                        {{else}}
+                                            {{printf "%.2f KB" .SystemData.SwapKB}}
+                                        {{end}}
+                                    {{else}}
+                                        N/A
+                                    {{end}}
+                                </span>
+                            </div>
+                            <div class="bg-gray-50 p-3 rounded">
+                                <span class="text-gray-500 block mb-1">Percentage</span>
+                                <span class="font-semibold text-lg">
+                                    {{if .SystemData.SwapPercent}}{{printf "%.1f%%" .SystemData.SwapPercent}}{{else}}N/A{{end}}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {{end}}
+
                 <!-- Back Link -->
                 <div class="border-t pt-6 mt-6">
                     <a href="/host/{{.HostID}}" class="inline-block bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded transition-colors">

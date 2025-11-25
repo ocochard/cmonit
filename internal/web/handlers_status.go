@@ -612,6 +612,14 @@ func getServiceDetailData(hostID, serviceName string) (*ServiceDetailData, error
 		}
 	}
 
+	// Get system metrics if this is a system service (type 5)
+	if svc.Type == 5 {
+		data.SystemData, err = getSystemMetricsForService(hostID, serviceName)
+		if err != nil {
+			log.Printf("[WARN] Failed to get system metrics for %s/%s: %v", hostID, serviceName, err)
+		}
+	}
+
 	// Get program metrics if this is a program service (type 7)
 	if svc.Type == 7 {
 		data.ProgramData, err = getProgramMetrics(hostID, serviceName)
@@ -833,4 +841,102 @@ func getProgramMetrics(hostID, serviceName string) (*ProgramMetrics, error) {
 	}
 
 	return &pm, nil
+}
+
+// getSystemMetricsForService retrieves the latest system metrics for a service.
+//
+// This queries the metrics table for load average, CPU breakdown, memory, and swap.
+// System metrics are identified by metric_type='load', 'cpu', 'memory', 'swap'.
+func getSystemMetricsForService(hostID, serviceName string) (*SystemMetrics, error) {
+	sm := &SystemMetrics{}
+
+	// Query all metrics at the most recent timestamp using a subquery
+	// This avoids the timestamp parsing issue with SQLite
+	const query = `
+		SELECT metric_type, metric_name, value
+		FROM metrics
+		WHERE host_id = ? AND service_name = ?
+		  AND metric_type IN ('load', 'cpu', 'memory', 'swap')
+		  AND collected_at = (
+		    SELECT MAX(collected_at)
+		    FROM metrics
+		    WHERE host_id = ? AND service_name = ?
+		      AND metric_type IN ('load', 'cpu', 'memory', 'swap')
+		  )
+		ORDER BY metric_type, metric_name
+	`
+
+	rows, err := db.Query(query, hostID, serviceName, hostID, serviceName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	// Map metrics to the SystemMetrics struct
+	for rows.Next() {
+		var metricType, metricName string
+		var value float64
+
+		err := rows.Scan(&metricType, &metricName, &value)
+		if err != nil {
+			return nil, err
+		}
+
+		switch metricType {
+		case "load":
+			switch metricName {
+			case "avg01":
+				sm.Load1Min = value
+			case "avg05":
+				sm.Load5Min = value
+			case "avg15":
+				sm.Load15Min = value
+			}
+
+		case "cpu":
+			switch metricName {
+			case "user":
+				sm.CPUUser = value
+			case "system":
+				sm.CPUSystem = value
+			case "nice":
+				sm.CPUNice = value
+			case "wait":
+				sm.CPUWait = value
+			case "hardirq", "interrupt":
+				// FreeBSD uses "interrupt", Linux uses "hardirq"
+				sm.CPUHardIRQ = value
+			case "softirq":
+				sm.CPUSoftIRQ = value
+			case "steal":
+				sm.CPUSteal = value
+			case "guest":
+				sm.CPUGuest = value
+			case "guestnice":
+				sm.CPUGuestNice = value
+			}
+
+		case "memory":
+			switch metricName {
+			case "percent":
+				sm.MemoryPercent = value
+			case "kilobyte":
+				sm.MemoryKB = int64(value)
+			}
+
+		case "swap":
+			switch metricName {
+			case "percent":
+				sm.SwapPercent = value
+			case "kilobyte":
+				sm.SwapKB = int64(value)
+			}
+		}
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return sm, nil
 }

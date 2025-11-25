@@ -121,6 +121,7 @@ type ServiceDetailData struct {
 	FilesystemData  *FilesystemMetrics // Filesystem metrics (if type 0)
 	FileData        *FileMetrics       // File metrics (if type 2)
 	ProcessData     *ProcessMetrics    // Process metrics (if type 3)
+	SystemData      *SystemMetrics     // System metrics (if type 5)
 	ProgramData     *ProgramMetrics    // Program metrics (if type 7)
 	NetworkData     *NetworkMetrics    // Network metrics (if type 8)
 	LastUpdate      time.Time          // When this data was retrieved
@@ -191,6 +192,33 @@ type ProgramMetrics struct {
 	Started    int64  // Unix timestamp when program started
 	ExitStatus int    // Last exit status code
 	Output     string // Last output from program
+}
+
+// SystemMetrics holds system service metrics (load, CPU, memory, swap).
+type SystemMetrics struct {
+	// Load Average
+	Load1Min  float64 // 1-minute load average
+	Load5Min  float64 // 5-minute load average
+	Load15Min float64 // 15-minute load average
+
+	// CPU Usage Breakdown (all values are percentages)
+	CPUUser     float64 // User CPU %
+	CPUSystem   float64 // System CPU %
+	CPUNice     float64 // Nice CPU %
+	CPUWait     float64 // I/O Wait % (Linux only)
+	CPUHardIRQ  float64 // Hard IRQ % (Linux: hardirq, FreeBSD: interrupt)
+	CPUSoftIRQ  float64 // Soft IRQ % (Linux only)
+	CPUSteal    float64 // Steal % (Linux only, virtualization)
+	CPUGuest    float64 // Guest % (Linux only, virtualization)
+	CPUGuestNice float64 // Guest Nice % (Linux only, virtualization)
+
+	// Memory Usage
+	MemoryPercent float64 // Memory usage percentage
+	MemoryKB      int64   // Memory usage in KB
+
+	// Swap Usage
+	SwapPercent float64 // Swap usage percentage
+	SwapKB      int64   // Swap usage in KB
 }
 
 // =============================================================================

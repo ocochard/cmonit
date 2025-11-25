@@ -595,6 +595,163 @@ Phase 1:
 
 ---
 
+## Phase 6: Enhanced System Metrics Display
+
+**Goal**: Display comprehensive system metrics (CPU breakdown, load average, memory, swap) in the Service Details page for System type services
+
+### Current State
+
+The System service type (type=5) currently shows minimal metrics in the service detail view. However, Monit agents already report comprehensive system information including:
+
+**Available Data** (from XML parser in `internal/parser/xml.go`):
+- **Load Average**: `Avg01`, `Avg05`, `Avg15` - 1min, 5min, and 15min load averages
+- **CPU Usage**: `User`, `System`, `Nice`, `HardIRQ`, `Wait` (Linux also includes: IOWait, SoftIRQ, Steal, Guest, GuestNice)
+- **Memory Usage**: `Percent`, `Kilobyte` - RAM usage percentage and absolute KB
+- **Swap Usage**: `Percent`, `Kilobyte` - Swap usage percentage and absolute KB
+
+**Current Database Storage** (`metrics` table):
+- System metrics ARE being stored: `load_1min`, `load_5min`, `load_15min`, `cpu_user`, `cpu_sys`, `cpu_nice`, `cpu_wait`, `memory_pct`, `memory_kb`, `swap_pct`, `swap_kb`
+
+**Problem**: The service detail page (`templates/service.html`) only displays basic information and doesn't show these comprehensive system metrics.
+
+### Requirements
+
+**User Request**: "Display comprehensive system metrics in the Service Details page including:
+- Load average (3 values: 1min, 5min, 15min)
+- CPU usage breakdown (varies by OS):
+  - Linux: %usr, %sys, %nice, %iowait, %hardirq, %softirq, %steal, %guest, %guestnice
+  - FreeBSD: %usr, %sys, %nice, %hardirq
+- Memory usage (percentage and formatted size)
+- Swap usage (percentage and formatted size)"
+
+### Implementation Plan
+
+**Phase 1: Backend Data Flow** ✓ (Already Complete)
+- [x] XML parser captures all system metrics (`internal/parser/xml.go`)
+- [x] Storage layer saves metrics to database (`internal/db/storage.go`)
+- [x] Service detail handler passes data to template (`internal/web/handlers.go`)
+
+**Phase 2: Template Enhancement** (To Implement)
+1. Read current `templates/service.html` structure
+2. Identify System service section (type=5)
+3. Add comprehensive metrics display sections:
+   - **Load Average Section**: Display 3 values with visual indicators
+   - **CPU Usage Breakdown**: Show all available CPU metrics with percentage bars
+   - **Memory Usage**: Display percentage + formatted size (KB/MB/GB conversion)
+   - **Swap Usage**: Display percentage + formatted size
+4. Add CSS styling for visual clarity
+5. Ensure responsive design (mobile-friendly)
+
+**Phase 3: Handler Data Preparation** (To Verify)
+1. Check `internal/web/handlers.go` service detail handler
+2. Verify all system metrics are being passed to template
+3. Add any missing data queries for System services
+4. Ensure metrics are queried from database correctly
+
+**Phase 4: UI/UX Design Considerations**
+- Group related metrics into clear sections
+- Use progress bars for percentages (CPU, memory, swap)
+- Format large numbers (KB → MB/GB) for readability
+- Add tooltips for technical terms
+- Use color coding (green=low, yellow=medium, red=high)
+- Ensure consistency with existing UI design patterns
+
+### Files to Modify
+
+1. **`templates/service.html`** (Primary)
+   - Add System metrics display sections
+   - Update HTML structure with proper Tailwind CSS classes
+   - Add metric visualization (progress bars, badges)
+
+2. **`internal/web/handlers.go`** (If needed)
+   - Verify `handleServiceDetail()` function
+   - Ensure System metrics are queried and passed to template
+   - Add helper functions for data formatting if needed
+
+3. **`internal/db/queries.go`** (If needed)
+   - Verify system metrics query functions
+   - Add any missing queries for historical data
+
+### Acceptance Tests
+
+**Functional Tests**:
+- [ ] Service detail page displays all load average values (1min, 5min, 15min)
+- [ ] CPU usage breakdown shows all available metrics for the OS
+- [ ] Memory usage displays both percentage and formatted size
+- [ ] Swap usage displays both percentage and formatted size
+- [ ] Metrics update when page refreshes
+- [ ] N/A displayed when metrics are not available
+- [ ] Values are formatted correctly (e.g., "1.2 GB" not "1234567 KB")
+
+**Visual Tests**:
+- [ ] Metrics are clearly grouped and labeled
+- [ ] Progress bars display correctly for percentages
+- [ ] Layout is responsive on mobile devices
+- [ ] Color coding is consistent with rest of application
+- [ ] No visual glitches or layout issues
+
+**Integration Tests**:
+- [ ] FreeBSD system metrics display correctly
+- [ ] Linux system metrics display correctly (if available)
+- [ ] Historical graphs include new metrics (future enhancement)
+- [ ] API endpoints return system metrics (existing functionality)
+
+### Implementation Steps
+
+**Step 1**: Read and analyze current `templates/service.html`
+- Understand existing template structure
+- Identify System service display section
+- Note current styling patterns
+
+**Step 2**: Design metrics layout
+- Sketch sections for Load, CPU, Memory, Swap
+- Decide on visualization approach (progress bars, badges, etc.)
+- Plan responsive design
+
+**Step 3**: Implement template changes
+- Add Load Average section
+- Add CPU Usage Breakdown section
+- Add Memory Usage section
+- Add Swap Usage section
+- Apply consistent styling
+
+**Step 4**: Verify handler data flow
+- Check that all metrics are passed to template
+- Add any missing database queries
+- Test with live data
+
+**Step 5**: Test and refine
+- Test on FreeBSD system (primary environment)
+- Verify all metrics display correctly
+- Check mobile responsiveness
+- Fix any issues
+
+### Platform Considerations
+
+**FreeBSD** (Primary development environment):
+- CPU metrics: User, System, Nice, HardIRQ
+- No IOWait, SoftIRQ, Steal, Guest, GuestNice
+
+**Linux** (Secondary support):
+- Full CPU breakdown including IOWait, SoftIRQ, Steal, Guest, GuestNice
+- Template should handle both cases gracefully
+
+**Display Strategy**:
+- Show all metrics that are available
+- Display "N/A" or hide sections for unavailable metrics
+- Use conditional rendering in template
+
+### Future Enhancements (Post-Implementation)
+
+- Historical graphs for system metrics (Phase 3 enhancement)
+- Alert thresholds for system metrics
+- Comparative view across multiple hosts
+- Export system metrics to CSV
+- System health score calculation
+- Predictive analysis (trend detection)
+
+---
+
 ## Future Enhancements
 
 - Prometheus exporter

@@ -19,7 +19,17 @@ Open Source central monitoring dashboard for Monit: collect status, graph metric
 - **Event tracking**: Automatic logging of service state changes
 - **Monit restart detection**: Tracks Monit daemon uptime and detects restarts
 - **Event history**: View all events per host with timestamps and details
-- **Stale host detection**: Alerts when hosts stop reporting (>5 minutes)
+- **Heartbeat-based health status**: Visual indicators (green/yellow/red) based on poll interval
+- **Stale host detection**: Automatic detection of offline hosts with configurable thresholds
+
+### Host Lifecycle Management
+- **Health indicators**: Color-coded status based on last heartbeat and poll interval
+  - Green: Healthy (last_seen < poll_interval × 2)
+  - Yellow: Warning (poll_interval × 2 ≤ last_seen < poll_interval × 5)
+  - Red: Offline (last_seen ≥ poll_interval × 5)
+- **Host deletion**: Remove offline hosts with safety checks (requires >1 hour offline)
+- **Cascade deletion**: Automatically removes all associated services, metrics, and events
+- **Deletion confirmation**: Requires hostname verification to prevent accidental removal
 
 ### Service Control
 - **Remote actions**: Start, stop, restart services from the dashboard
@@ -74,6 +84,12 @@ go build -o cmonit ./cmd/cmonit
 # Development mode (current directory, stderr logging)
 ./cmonit -db ./cmonit.db -pidfile ./cmonit.pid
 
+# Run as daemon in background
+./cmonit -daemon
+
+# Custom collector credentials (Monit agents must match)
+./cmonit -user myuser -password mypassword
+
 # With HTTP Basic Authentication
 ./cmonit -web-user admin -web-password secretpass
 
@@ -100,6 +116,15 @@ go build -o cmonit ./cmd/cmonit
 
   -pidfile string
         PID file path (default "/var/run/cmonit/cmonit.pid")
+
+  -user string
+        Collector HTTP Basic Auth username - Monit agents must use this (default "monit")
+
+  -password string
+        Collector HTTP Basic Auth password - Monit agents must use this (default "monit")
+
+  -daemon
+        Run in background as a daemon process
 
   -syslog string
         Syslog facility for daemon logging (daemon, local0-local7)
@@ -164,12 +189,17 @@ set httpd port 2812 and
 
 Replace `cmonit-server` with the hostname or IP where cmonit is running.
 
+**Note**: The default collector credentials are `monit:monit`. If you change them using `-user` and `-password` flags, update all Monit agents accordingly.
+
 Example:
 ```bash
-# If cmonit runs on 192.168.1.100
+# Default credentials
 set mmonit http://monit:monit@192.168.1.100:8080/collector
 
-# Or if running locally
+# Custom credentials (if cmonit started with -user myuser -password mypass)
+set mmonit http://myuser:mypass@192.168.1.100:8080/collector
+
+# Local connection
 set mmonit http://monit:monit@localhost:8080/collector
 ```
 

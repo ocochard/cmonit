@@ -1162,9 +1162,24 @@ func StoreRemoteHostMetrics(db *sql.DB, hostID string, service *parser.Service) 
 		return nil
 	}
 
+	// DEBUG: Log service name and type
+	if debugMode {
+		log.Printf("[DEBUG] StoreRemoteHostMetrics called for %s/%s (type %d)", hostID, service.Name, service.Type)
+		log.Printf("[DEBUG]   ICMP: %v, Port: %v, Unix: %v", service.ICMP != nil, service.Port != nil, service.Unix != nil)
+		if service.ICMP != nil {
+			log.Printf("[DEBUG]   ICMP data: type=%s, responsetime=%.6f", service.ICMP.Type, service.ICMP.ResponseTime)
+		}
+		if service.Port != nil {
+			log.Printf("[DEBUG]   Port data: hostname=%s, port=%d, responsetime=%.6f", service.Port.Hostname, service.Port.PortNumber, service.Port.ResponseTime)
+		}
+	}
+
 	// Check if any remote host metrics are present
 	if service.ICMP == nil && service.Port == nil && service.Unix == nil {
 		// No remote host metrics in this service
+		if debugMode {
+			log.Printf("[DEBUG] No remote host metrics found for %s/%s", hostID, service.Name)
+		}
 		return nil
 	}
 

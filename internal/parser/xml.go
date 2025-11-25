@@ -927,6 +927,11 @@ type ServiceXML struct {
 	System  *SystemMetrics `xml:"system,omitempty"`
 	Program *ProgramInfo   `xml:"program,omitempty"`
 	Link    *NetworkLink   `xml:"link,omitempty"`
+
+	// Remote host monitoring fields (for type 4 and type 3 with checks)
+	ICMP    *ICMPInfo        `xml:"icmp,omitempty"`
+	Port    *PortInfo        `xml:"port,omitempty"`
+	Unix    *UnixSocketInfo  `xml:"unix,omitempty"`
 }
 
 // ToService converts the flat ServiceXML to the domain Service struct.
@@ -946,6 +951,9 @@ func (sx *ServiceXML) ToService() Service {
 		System:        sx.System,
 		Program:       sx.Program,
 		Link:          sx.Link,
+		ICMP:          sx.ICMP,
+		Port:          sx.Port,
+		Unix:          sx.Unix,
 	}
 
 	switch sx.Type {

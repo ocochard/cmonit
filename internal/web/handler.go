@@ -682,30 +682,74 @@ func getServiceStatusInfo(status int) (string, string) {
 
 // StatusMessage returns a human-readable status message for the service.
 //
-// Monit status codes (from monit-5.35.2/src/monit.h and event.h):
-// - 0: OK
-// - 1: Failed
-// - 2: Resource limit matched
-// - 4: Execution failed
-// - 8: Not monitored
-// - 16: Initializing
-// - 32: Connection failed (Event_Connection = 0x20)
+// Monit status codes (from monit-5.35.2/src/event.h Event_Type enum):
+// These are bit flags that can be combined, but typically appear individually.
 func (s *Service) StatusMessage() string {
 	switch s.Status {
 	case 0:
 		return "OK"
-	case 1:
-		return "Failed"
-	case 2:
+	case 0x1: // Event_Checksum
+		return "Checksum failed"
+	case 0x2: // Event_Resource
 		return "Resource limit matched"
-	case 4:
-		return "Execution failed"
-	case 8:
-		return "Not monitored"
-	case 16:
-		return "Initializing"
-	case 32:
+	case 0x4: // Event_Timeout
+		return "Timeout"
+	case 0x8: // Event_Timestamp
+		return "Timestamp changed"
+	case 0x10: // Event_Size
+		return "Size changed"
+	case 0x20: // Event_Connection
 		return "Connection failed"
+	case 0x40: // Event_Permission
+		return "Permission failed"
+	case 0x80: // Event_Uid
+		return "UID failed"
+	case 0x100: // Event_Gid
+		return "GID failed"
+	case 0x200: // Event_NonExist
+		return "Does not exist"
+	case 0x400: // Event_Invalid
+		return "Invalid type"
+	case 0x800: // Event_Data
+		return "Data access error"
+	case 0x1000: // Event_Exec
+		return "Execution failed"
+	case 0x2000: // Event_FsFlag
+		return "Filesystem flags changed"
+	case 0x4000: // Event_Icmp
+		return "ICMP failed"
+	case 0x8000: // Event_Content
+		return "Content match failed"
+	case 0x10000: // Event_Instance
+		return "Instance changed"
+	case 0x20000: // Event_Action
+		return "Action done"
+	case 0x40000: // Event_Pid
+		return "PID changed"
+	case 0x80000: // Event_PPid
+		return "PPID changed"
+	case 0x100000: // Event_Heartbeat
+		return "Heartbeat failed"
+	case 0x200000: // Event_Status
+		return "Status changed"
+	case 0x400000: // Event_Uptime
+		return "Uptime failed"
+	case 0x800000: // Event_Link
+		return "Link down"
+	case 0x1000000: // Event_Speed
+		return "Speed changed"
+	case 0x2000000: // Event_Saturation
+		return "Saturation exceeded"
+	case 0x4000000: // Event_ByteIn
+		return "Download bytes exceeded"
+	case 0x8000000: // Event_ByteOut
+		return "Upload bytes exceeded"
+	case 0x10000000: // Event_PacketIn
+		return "Download packets exceeded"
+	case 0x20000000: // Event_PacketOut
+		return "Upload packets exceeded"
+	case 0x40000000: // Event_Exist
+		return "Exists"
 	default:
 		return fmt.Sprintf("Unknown status (%d)", s.Status)
 	}

@@ -132,6 +132,7 @@ const (
 		system_uptime INTEGER,
 		boottime INTEGER,
 		monit_uptime INTEGER,
+		poll_interval INTEGER DEFAULT 30,
 		last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		UNIQUE(hostname)

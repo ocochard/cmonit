@@ -10,21 +10,19 @@
 #                               Set it to "YES" to enable cmonit.
 # cmonit_user (string):         Set user to run cmonit.
 #                               Default is "root".
-# cmonit_collector (string):    Collector port number (inherits IP from cmonit_listen).
-#                               Default is "8080".
-# cmonit_listen (string):       Web UI listen address.
-#                               Default is "localhost:3000".
-# cmonit_db (string):           Database file path.
-#                               Default is "/var/run/cmonit/cmonit.db".
-# cmonit_pidfile (string):      PID file path.
-#                               Default is "/var/run/cmonit/cmonit.pid".
-# cmonit_syslog (string):       Syslog facility (daemon, local0-local7).
-#                               Default is "daemon" (use syslog).
-#                               Set to empty "" to log to stderr.
-# cmonit_collector_user (string):   Collector HTTP Basic Auth username.
-#                                   Default is "monit".
-# cmonit_collector_password (string): Collector HTTP Basic Auth password.
-#                                     Default is "monit".
+# cmonit_config (string):       Configuration file path (optional).
+#                               If set, uses config file instead of individual flags.
+#                               Example: "/etc/cmonit/cmonit.conf"
+#                               Default is empty (use individual flags).
+# cmonit_flags (string):        Additional command-line flags.
+#                               Default is empty.
+#                               Example: "-debug -listen 0.0.0.0:3000"
+#
+# Legacy individual flag variables (used when cmonit_config is not set):
+# cmonit_pidfile (string):      PID file path (default: "/var/run/cmonit/cmonit.pid")
+# cmonit_db (string):           Database path (default: "/var/run/cmonit/cmonit.db")
+#
+# For all other settings, use either cmonit_config or cmonit_flags.
 
 . /etc/rc.subr
 
@@ -35,21 +33,22 @@ load_rc_config $name
 
 : ${cmonit_enable:="NO"}
 : ${cmonit_user:="root"}
-: ${cmonit_collector:="8080"}
-: ${cmonit_listen:="localhost:3000"}
-: ${cmonit_db:="/var/run/cmonit/cmonit.db"}
+: ${cmonit_config:=""}
+: ${cmonit_flags:=""}
 : ${cmonit_pidfile:="/var/run/cmonit/cmonit.pid"}
-: ${cmonit_syslog:="daemon"}
-: ${cmonit_collector_user:="monit"}
-: ${cmonit_collector_password:="monit"}
+: ${cmonit_db:="/var/run/cmonit/cmonit.db"}
 
 pidfile="${cmonit_pidfile}"
 command="/usr/local/bin/${name}"
-command_args="-collector ${cmonit_collector} -listen ${cmonit_listen} -db ${cmonit_db} -pidfile ${cmonit_pidfile} -collector-user ${cmonit_collector_user} -collector-password ${cmonit_collector_password}"
 
-# Add syslog facility if specified
-if [ -n "${cmonit_syslog}" ]; then
-    command_args="${command_args} -syslog ${cmonit_syslog}"
+# Build command arguments
+if [ -n "${cmonit_config}" ]; then
+    # Config file mode: use -config flag + any additional flags
+    command_args="-config ${cmonit_config} -pidfile ${cmonit_pidfile} -db ${cmonit_db} ${cmonit_flags}"
+else
+    # CLI-only mode: use -pidfile and -db, let user set everything else via cmonit_flags
+    # For backward compatibility, you can still set individual flags in cmonit_flags
+    command_args="-pidfile ${cmonit_pidfile} -db ${cmonit_db} ${cmonit_flags}"
 fi
 
 start_precmd="${name}_prestart"
@@ -57,7 +56,7 @@ start_precmd="${name}_prestart"
 cmonit_prestart()
 {
     # Create runtime directory (/var/run/cmonit) if it doesn't exist
-    # This directory holds both the database and PID file
+    # This directory typically holds both the database and PID file
     runtime_dir="/var/run/cmonit"
     if [ ! -d "${runtime_dir}" ]; then
         mkdir -p "${runtime_dir}"

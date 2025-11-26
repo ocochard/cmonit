@@ -356,13 +356,18 @@ sudo cp cmonit /usr/local/bin/
 sudo cp rc.d/cmonit /usr/local/etc/rc.d/
 sudo chmod +x /usr/local/etc/rc.d/cmonit
 
-# Configure in /etc/rc.conf
+# Install config file (recommended)
+sudo mkdir -p /etc/cmonit
+sudo cp cmonit.conf.sample /etc/cmonit/cmonit.conf
+sudo vim /etc/cmonit/cmonit.conf
+
+# Configure in /etc/rc.conf (using config file)
 sudo sysrc cmonit_enable="YES"
-sudo sysrc cmonit_collector="8080"
-sudo sysrc cmonit_listen="0.0.0.0:3000"
-sudo sysrc cmonit_db="/var/run/cmonit/cmonit.db"
-sudo sysrc cmonit_pidfile="/var/run/cmonit/cmonit.pid"
-sudo sysrc cmonit_syslog="daemon"
+sudo sysrc cmonit_config="/etc/cmonit/cmonit.conf"
+
+# OR configure with individual flags (without config file)
+sudo sysrc cmonit_enable="YES"
+sudo sysrc cmonit_flags="-listen 0.0.0.0:3000 -collector 8080 -syslog daemon"
 
 # Start the service
 sudo service cmonit start
@@ -370,6 +375,23 @@ sudo service cmonit start
 # Check status
 sudo service cmonit status
 ```
+
+**Configuration Methods:**
+
+1. **Config File (Recommended):**
+   ```bash
+   # /etc/rc.conf
+   cmonit_enable="YES"
+   cmonit_config="/etc/cmonit/cmonit.conf"
+   cmonit_flags="-debug"  # Optional: add extra flags
+   ```
+
+2. **CLI Flags Only:**
+   ```bash
+   # /etc/rc.conf
+   cmonit_enable="YES"
+   cmonit_flags="-listen 0.0.0.0:3000 -collector 8080 -syslog daemon"
+   ```
 
 See `rc.d/cmonit` for all configuration options.
 

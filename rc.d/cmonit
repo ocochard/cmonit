@@ -10,8 +10,8 @@
 #                               Set it to "YES" to enable cmonit.
 # cmonit_user (string):         Set user to run cmonit.
 #                               Default is "root".
-# cmonit_collector (string):    Collector listen address.
-#                               Default is ":8080".
+# cmonit_collector (string):    Collector port number (inherits IP from cmonit_listen).
+#                               Default is "8080".
 # cmonit_listen (string):       Web UI listen address.
 #                               Default is "localhost:3000".
 # cmonit_db (string):           Database file path.
@@ -31,7 +31,7 @@ load_rc_config $name
 
 : ${cmonit_enable:="NO"}
 : ${cmonit_user:="root"}
-: ${cmonit_collector:=":8080"}
+: ${cmonit_collector:="8080"}
 : ${cmonit_listen:="localhost:3000"}
 : ${cmonit_db:="/var/run/cmonit/cmonit.db"}
 : ${cmonit_pidfile:="/var/run/cmonit/cmonit.pid"}

@@ -299,7 +299,7 @@ See `internal/web/mmonit_api.go` for implementation details.
 All configuration via command-line flags:
 
 ```
--collector    Collector listen address (default ":8080")
+-collector    Collector port number (default "8080") - inherits IP from -listen
 -listen       Web UI listen address (default "localhost:3000")
 -db           Database path (default "/var/run/cmonit/cmonit.db")
 -pidfile      PID file path (default "/var/run/cmonit/cmonit.pid")

@@ -94,8 +94,8 @@ func main() {
 	// - "192.168.1.10:8080" = specific IPv4
 	// - "[::1]:8080" = IPv6 localhost
 	// - "[::]:8080" = all IPv6 interfaces
-	collectorAddr := flag.String("collector", ":8080",
-		"Collector listen address (e.g., :8080, localhost:8080, 0.0.0.0:8080, [::]:8080)")
+	collectorAddr := flag.String("collector", "8080",
+		"Collector port number (e.g., 8080, 9000) - inherits IP from -listen")
 
 	webAddr := flag.String("listen", "localhost:3000",
 		"Web UI listen address (e.g., localhost:3000, 0.0.0.0:3000, [::]:3000, 192.168.1.10:3000)")
@@ -142,8 +142,17 @@ func main() {
 	//   ./cmonit                                 # Use defaults
 	//   ./cmonit -listen 0.0.0.0:3000           # Web accessible from anywhere
 	//   ./cmonit -listen [::]:3000              # IPv6 all interfaces
-	//   ./cmonit -collector :9000 -listen :4000 # Custom ports
+	//   ./cmonit -collector 9000 -listen :4000  # Custom ports
 	flag.Parse()
+
+	// Process collector address to inherit IP from -listen
+	//
+	// If -collector is just a port number (e.g., "8080" or ":8080"),
+	// combine it with the host from -listen for consistency.
+	//
+	// This ensures both servers listen on the same interface by default.
+	// Users can still override by specifying a full address for -collector.
+	*collectorAddr = buildAddress(*webAddr, *collectorAddr)
 
 	// Handle daemon mode
 	//
@@ -930,6 +939,91 @@ func handleCollector(w http.ResponseWriter, r *http.Request) {
 	// The function returns here
 	// Go automatically sends the response to the client
 	// No need to explicitly "send" like in some other languages
+}
+
+// buildAddress constructs a full listen address by combining host from listenAddr
+// with port from collectorPort.
+//
+// This allows the -collector flag to specify just a port number, inheriting
+// the IP address from the -listen flag for consistency.
+//
+// Parameters:
+//   - listenAddr: The -listen flag value (e.g., "0.0.0.0:3000", "localhost:3000", "[::]:3000")
+//   - collectorPort: The -collector flag value (e.g., "8080", ":8080", or "192.168.1.10:8080")
+//
+// Returns:
+//   - A full address string for the collector (e.g., "0.0.0.0:8080")
+//
+// Behavior:
+//   - If collectorPort is just a number (e.g., "8080"), prepend host from listenAddr
+//   - If collectorPort starts with ":" (e.g., ":8080"), prepend host from listenAddr
+//   - If collectorPort already contains a host, return it as-is (backwards compatibility)
+//
+// Examples:
+//   - buildAddress("0.0.0.0:3000", "8080") -> "0.0.0.0:8080"
+//   - buildAddress("localhost:3000", ":8080") -> "localhost:8080"
+//   - buildAddress("[::]:3000", "8080") -> "[::]:8080"
+//   - buildAddress("0.0.0.0:3000", "192.168.1.10:8080") -> "192.168.1.10:8080" (no change)
+func buildAddress(listenAddr, collectorPort string) string {
+	// Check if collectorPort already looks like a full address (contains ":")
+	// but is not just ":port" format
+	if strings.Contains(collectorPort, ":") && !strings.HasPrefix(collectorPort, ":") {
+		// Already a full address like "192.168.1.10:8080", use as-is
+		return collectorPort
+	}
+
+	// Extract host from listenAddr using strings.Cut
+	//
+	// strings.Cut splits on the first occurrence of ":"
+	// Examples:
+	// - IPv4: "0.0.0.0:3000" -> host="0.0.0.0", after="3000", found=true
+	// - Hostname: "localhost:3000" -> host="localhost", after="3000", found=true
+	// - Port only: ":3000" -> host="", after="3000", found=true
+	// - IPv6: "[::]:3000" -> host="[::", after="]:3000", found=true (needs special handling)
+	host, _, found := strings.Cut(listenAddr, ":")
+	if !found || listenAddr == "" {
+		// No ":" found or empty address, fall back to collectorPort as-is
+		// This shouldn't happen with valid flag values
+		if strings.HasPrefix(collectorPort, ":") {
+			return collectorPort
+		}
+		return ":" + collectorPort
+	}
+
+	// Special handling for IPv6 addresses
+	// If listenAddr is "[::]:3000", host will be "[::", we need to extract "::"
+	if strings.HasPrefix(host, "[") {
+		// IPv6 address, need to handle brackets
+		// listenAddr is something like "[::]:3000"
+		// We want to extract just the IPv6 address part
+		endBracket := strings.Index(listenAddr, "]")
+		if endBracket > 0 {
+			host = listenAddr[1:endBracket] // Extract "::";
+		}
+	}
+
+	// Handle empty host (when listenAddr starts with ":")
+	if host == "" {
+		// listenAddr was ":3000", which means all interfaces
+		// Use "" which will result in ":port" format
+		if strings.HasPrefix(collectorPort, ":") {
+			return collectorPort
+		}
+		return ":" + collectorPort
+	}
+
+	// Normalize collectorPort to remove leading ":" if present
+	port := strings.TrimPrefix(collectorPort, ":")
+
+	// Combine host and port
+	// For IPv6, wrap in brackets
+	if strings.Contains(host, ":") {
+		// IPv6 address, needs brackets
+		return "[" + host + "]:" + port
+	}
+
+	// IPv4 or hostname
+	return host + ":" + port
 }
 
 // parseSyslogFacility converts a facility string to syslog.Priority

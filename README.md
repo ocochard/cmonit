@@ -54,17 +54,17 @@ go build -o cmonit ./cmd/cmonit
 ### Run
 
 ```bash
-# Default: collector on :8080, web on localhost:3000
+# Default: collector on localhost:8080, web on localhost:3000
 ./cmonit
 
-# Web accessible from all interfaces
+# Web accessible from all interfaces (both collector and web UI)
 ./cmonit -listen 0.0.0.0:3000
 
 # IPv6 support
 ./cmonit -listen [::]:3000
 
-# Custom ports
-./cmonit -collector :9000 -listen :4000
+# Custom ports (collector inherits IP from -listen)
+./cmonit -collector 9000 -listen 0.0.0.0:4000
 
 # Specific IP address
 ./cmonit -listen 192.168.1.10:3000
@@ -104,12 +104,14 @@ go build -o cmonit ./cmd/cmonit
 
 ```
   -collector string
-        Collector listen address (default ":8080")
-        Examples: :8080, localhost:8080, 0.0.0.0:8080, [::]:8080
+        Collector port number - inherits IP address from -listen (default "8080")
+        Examples: 8080, 9000
+        Note: Collector listens on same IP as -listen with this port
 
   -listen string
         Web UI listen address (default "localhost:3000")
         Examples: localhost:3000, 0.0.0.0:3000, [::]:3000, 192.168.1.10:3000
+        Note: Collector inherits the IP address from this flag
 
   -db string
         Database file path (default "/var/run/cmonit/cmonit.db")
@@ -211,8 +213,10 @@ monit reload
 ## Architecture
 
 ```
-Monit Agent → :8080/collector → SQLite → :3000 Dashboard
+Monit Agent → localhost:8080/collector → SQLite → localhost:3000 Dashboard
 ```
+
+Note: Both collector and web UI listen on the same IP address (specified by `-listen`). The collector uses port 8080 (configurable with `-collector`) and web UI uses port 3000 (part of `-listen`).
 
 ## Security
 
@@ -293,7 +297,7 @@ sudo chmod +x /usr/local/etc/rc.d/cmonit
 
 # Configure in /etc/rc.conf
 sudo sysrc cmonit_enable="YES"
-sudo sysrc cmonit_collector=":8080"
+sudo sysrc cmonit_collector="8080"
 sudo sysrc cmonit_listen="0.0.0.0:3000"
 sudo sysrc cmonit_db="/var/run/cmonit/cmonit.db"
 sudo sysrc cmonit_pidfile="/var/run/cmonit/cmonit.pid"

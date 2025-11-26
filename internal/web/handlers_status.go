@@ -2,6 +2,7 @@ package web
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -1022,4 +1023,150 @@ func getRemoteHostMetrics(hostID, serviceName string) (*RemoteHostMetrics, error
 	}
 
 	return &rhm, nil
+}
+
+// HandleAvailabilityAPI serves the availability metrics API endpoint.
+//
+// This endpoint returns time-series availability data for a specific host
+// in JSON format suitable for Chart.js graphing.
+//
+// Query parameters:
+//   - host_id (required): The host ID to query
+//   - hours (optional): Number of hours to look back (default: 24)
+//
+// Response format:
+//
+//	{
+//	  "host_id": "bigone-0",
+//	  "hostname": "bigone",
+//	  "datapoints": [
+//	    {"timestamp": 1234567890, "status": "green", "label": "2025-11-26 12:00"},
+//	    {"timestamp": 1234567950, "status": "yellow", "label": "2025-11-26 12:01"},
+//	    ...
+//	  ]
+//	}
+func HandleAvailabilityAPI(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse query parameters
+	hostID := r.URL.Query().Get("host_id")
+	if hostID == "" {
+		http.Error(w, "Missing required parameter: host_id", http.StatusBadRequest)
+		return
+	}
+
+	// Parse hours parameter (default 24 hours)
+	hoursStr := r.URL.Query().Get("hours")
+	hours := 24
+	if hoursStr != "" {
+		var err error
+		_, err = fmt.Sscanf(hoursStr, "%d", &hours)
+		if err != nil || hours < 1 || hours > 168 { // Max 1 week
+			http.Error(w, "Invalid hours parameter (must be 1-168)", http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Get availability data
+	data, err := getAvailabilityData(hostID, hours)
+	if err != nil {
+		log.Printf("[ERROR] Failed to get availability data for %s: %v", hostID, err)
+		http.Error(w, "Failed to retrieve availability data", http.StatusInternalServerError)
+		return
+	}
+
+	// Set JSON response headers
+	w.Header().Set("Content-Type", "application/json")
+
+	// Encode and send JSON response
+	encoder := json.NewEncoder(w)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(data); err != nil {
+		log.Printf("[ERROR] Failed to encode JSON response: %v", err)
+	}
+}
+
+// AvailabilityDatapoint represents a single availability measurement.
+type AvailabilityDatapoint struct {
+	Timestamp int64  `json:"timestamp"` // Unix timestamp
+	Status    string `json:"status"`    // "green", "yellow", or "red"
+	Label     string `json:"label"`     // Human-readable timestamp
+}
+
+// AvailabilityResponse is the JSON response structure for the availability API.
+type AvailabilityResponse struct {
+	HostID     string                  `json:"host_id"`
+	Hostname   string                  `json:"hostname"`
+	Datapoints []AvailabilityDatapoint `json:"datapoints"`
+}
+
+// getAvailabilityData queries availability metrics for a host.
+//
+// Parameters:
+//   - hostID: The host identifier
+//   - hours: Number of hours to look back
+//
+// Returns availability data in a format suitable for JSON encoding.
+func getAvailabilityData(hostID string, hours int) (*AvailabilityResponse, error) {
+	// Get hostname first
+	var hostname string
+	err := db.QueryRow("SELECT hostname FROM hosts WHERE id = ?", hostID).Scan(&hostname)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("host not found: %s", hostID)
+		}
+		return nil, fmt.Errorf("failed to get hostname: %w", err)
+	}
+
+	// Calculate timestamp cutoff
+	cutoffTime := time.Now().Add(-time.Duration(hours) * time.Hour).Unix()
+
+	// Query availability data
+	const query = `
+		SELECT timestamp, status
+		FROM host_availability
+		WHERE host_id = ? AND timestamp >= ?
+		ORDER BY timestamp ASC
+	`
+
+	rows, err := db.Query(query, hostID, cutoffTime)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query availability: %w", err)
+	}
+	defer rows.Close()
+
+	var datapoints []AvailabilityDatapoint
+
+	for rows.Next() {
+		var timestamp int64
+		var status string
+
+		err := rows.Scan(&timestamp, &status)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+
+		// Format timestamp as human-readable label
+		t := time.Unix(timestamp, 0)
+		label := t.Format("Jan 2 15:04")
+
+		datapoints = append(datapoints, AvailabilityDatapoint{
+			Timestamp: timestamp,
+			Status:    status,
+			Label:     label,
+		})
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating rows: %w", err)
+	}
+
+	return &AvailabilityResponse{
+		HostID:     hostID,
+		Hostname:   hostname,
+		Datapoints: datapoints,
+	}, nil
 }

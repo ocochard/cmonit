@@ -39,7 +39,7 @@ import (
 
 // currentSchemaVersion is the current database schema version.
 // Increment this when making schema changes that require migration.
-const currentSchemaVersion = 8
+const currentSchemaVersion = 9
 
 // SQL schema for the cmonit database
 //
@@ -541,6 +541,47 @@ const (
 	createRemoteHostMetricsIndex = `
 	CREATE INDEX IF NOT EXISTS idx_remote_host_metrics_lookup
 		ON remote_host_metrics(host_id, service_name, collected_at);`
+
+	// createHostAvailabilityTable creates the host_availability table
+	//
+	// This table stores host availability history for time-series graphing.
+	// It records the health status of each host over time based on heartbeat monitoring.
+	//
+	// Columns:
+	//   - id: Auto-incrementing integer
+	//   - host_id: Which host this availability record is for
+	//   - timestamp: When this status was recorded (Unix timestamp)
+	//   - status: Health status ('green', 'yellow', 'red')
+	//   - last_seen: Last time host reported data (Unix timestamp)
+	//   - poll_interval: Monit poll interval in seconds (for reference)
+	//
+	// Status meanings:
+	//   - 'green': Host is online and healthy (last_seen < poll_interval * 2)
+	//   - 'yellow': Host is in warning state (last_seen between poll_interval * 2 and * 4)
+	//   - 'red': Host is offline (last_seen > poll_interval * 4)
+	//
+	// This is time-series data that allows tracking host uptime/downtime over time.
+	// Records are inserted:
+	//   - When new data is received from a host (records 'green' status)
+	//   - Periodically by background job (checks all hosts, records current status)
+	createHostAvailabilityTable = `
+	CREATE TABLE IF NOT EXISTS host_availability (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		host_id TEXT NOT NULL,
+		timestamp INTEGER NOT NULL,
+		status TEXT NOT NULL,
+		last_seen INTEGER NOT NULL,
+		poll_interval INTEGER NOT NULL,
+		FOREIGN KEY (host_id) REFERENCES hosts(id) ON DELETE CASCADE
+	);`
+
+	// createHostAvailabilityIndex creates index for fast availability queries
+	//
+	// Optimizes queries like:
+	// "Show me availability history for host123 over the last 24 hours"
+	createHostAvailabilityIndex = `
+	CREATE INDEX IF NOT EXISTS idx_host_availability_lookup
+		ON host_availability(host_id, timestamp);`
 )
 
 // InitDB initializes the database and creates all tables.
@@ -1064,6 +1105,29 @@ func migrateSchema(db *sql.DB, fromVersion, toVersion int) error {
 				return err
 			}
 			log.Printf("[INFO] Successfully migrated to schema version 8")
+
+		case 8:
+			// Migration from version 8 to version 9
+			// Add host_availability table for tracking host uptime/downtime over time
+			log.Printf("[INFO] Migrating from v8 to v9: Adding host_availability table")
+
+			// Create host_availability table
+			_, err := db.Exec(createHostAvailabilityTable)
+			if err != nil {
+				return fmt.Errorf("migration v8->v9 failed creating host_availability table: %w", err)
+			}
+
+			_, err = db.Exec(createHostAvailabilityIndex)
+			if err != nil {
+				return fmt.Errorf("migration v8->v9 failed creating host_availability index: %w", err)
+			}
+
+			fromVersion = 9
+			err = setSchemaVersion(db, fromVersion)
+			if err != nil {
+				return err
+			}
+			log.Printf("[INFO] Successfully migrated to schema version 9")
 
 		default:
 			return fmt.Errorf("no migration path from version %d", fromVersion)

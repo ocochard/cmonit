@@ -31,6 +31,7 @@ import (
 	"strconv"        // String conversion utilities
 	"strings"        // String manipulation
 	"syscall"        // System call interface (for signal constants)
+	"time"           // Time operations and ticker
 
 	// Internal packages (our code)
 	// These are relative to the module path (github.com/ocochard/cmonit)
@@ -397,6 +398,10 @@ func main() {
 	// Used by Chart.js to draw response time graphs on remote host service detail pages
 	webMux.HandleFunc("/api/remote-metrics", web.HandleRemoteHostMetricsAPI)
 
+	// /api/availability returns JSON with host availability time-series data
+	// Used by Chart.js to draw availability status graphs showing green/yellow/red status
+	webMux.HandleFunc("/api/availability", web.HandleAvailabilityAPI)
+
 	// M/Monit-compatible API endpoints
 	//
 	// These endpoints provide M/Monit HTTP API compatibility
@@ -503,6 +508,42 @@ func main() {
 			err := http.ListenAndServe(*webAddr, handler)
 			if err != nil {
 				log.Fatalf("[FATAL] Web server failed: %v", err)
+			}
+		}
+	}()
+
+	// Start availability recording background job
+	//
+	// This goroutine runs continuously, recording availability status
+	// for all hosts at regular intervals (every 60 seconds by default).
+	//
+	// Why is this needed?
+	// - RecordHostAvailability is called when we RECEIVE data from Monit
+	// - But what about hosts that go offline? They stop sending data
+	// - This background job ensures we continue recording their "offline" status
+	// - Creates a complete time-series even when hosts are down
+	//
+	// The job:
+	// 1. Sleeps for 60 seconds
+	// 2. Queries all hosts from the database
+	// 3. For each host, records their current availability status
+	// 4. Repeats forever
+	go func() {
+		log.Printf("[INFO] Starting availability recording background job")
+
+		// Use a ticker to run every 60 seconds
+		// time.Ticker sends a value on its channel at regular intervals
+		ticker := time.NewTicker(60 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			// Wait for the next tick
+			<-ticker.C
+
+			// Record availability for all hosts
+			err := db.RecordAvailabilityForAllHosts(globalDB)
+			if err != nil {
+				log.Printf("[WARN] Failed to record availability for all hosts: %v", err)
 			}
 		}
 	}()

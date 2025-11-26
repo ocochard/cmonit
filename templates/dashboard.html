@@ -87,6 +87,24 @@
                 </div>
 
                 <div class="px-6 py-4">
+                    <!-- Host Availability Graph -->
+                    <div class="mb-6">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-lg font-semibold text-gray-800">Host Availability</h3>
+                            <div class="flex gap-2">
+                                <button onclick="changeAvailabilityRange('{{$host.ID}}', '1')" class="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-sm avail-btn" data-hours="1">1h</button>
+                                <button onclick="changeAvailabilityRange('{{$host.ID}}', '6')" class="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-sm avail-btn" data-hours="6">6h</button>
+                                <button onclick="changeAvailabilityRange('{{$host.ID}}', '24')" class="px-3 py-1 bg-blue-600 text-white rounded text-sm avail-btn active" data-hours="24">24h</button>
+                                <button onclick="changeAvailabilityRange('{{$host.ID}}', '168')" class="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-sm avail-btn" data-hours="168">7d</button>
+                            </div>
+                        </div>
+                        <div class="bg-gray-50 p-4 rounded">
+                            <div style="position: relative; height: 250px;">
+                                <canvas id="availability-chart-{{$host.ID}}"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
                     {{if $host.Services}}
                     <table class="min-w-full">
                         <thead>
@@ -227,6 +245,19 @@
                     {{end}}
                 </div>
             </div>
+
+            <!-- Initialize availability chart for this host -->
+            <script>
+                // Load availability data after DOM is ready
+                if (document.readyState === 'loading') {
+                    document.addEventListener('DOMContentLoaded', function() {
+                        loadAvailability('{{$host.ID}}', '24');
+                    });
+                } else {
+                    loadAvailability('{{$host.ID}}', '24');
+                }
+            </script>
+
             {{end}}
         {{else}}
             <div class="bg-white rounded-lg shadow-md p-8 text-center">
@@ -457,6 +488,120 @@
 
         // Reload metrics with new range
         loadMetrics(hostId, service, range);
+    }
+
+    // Load and display availability data
+    async function loadAvailability(hostId, hours) {
+        try {
+            const response = await fetch(`/api/availability?host_id=${hostId}&hours=${hours}`);
+            const data = await response.json();
+
+            if (!data.datapoints || data.datapoints.length === 0) {
+                console.log('No availability data available');
+                return;
+            }
+
+            updateAvailabilityChart(hostId, data);
+
+        } catch (error) {
+            console.error('Failed to load availability:', error);
+        }
+    }
+
+    // Update availability chart
+    function updateAvailabilityChart(hostId, data) {
+        const ctx = document.getElementById(`availability-chart-${hostId}`);
+        if (!ctx) return;
+
+        const chartKey = `availability-${hostId}`;
+        if (charts[chartKey]) {
+            charts[chartKey].destroy();
+        }
+
+        // Convert status to numeric values (green=1, yellow=0.5, red=0)
+        const statusToValue = {
+            'green': 1,
+            'yellow': 0.5,
+            'red': 0
+        };
+
+        // Map datapoints
+        const labels = data.datapoints.map(dp => dp.label);
+        const values = data.datapoints.map(dp => statusToValue[dp.status] || 0);
+        const colors = data.datapoints.map(dp => {
+            if (dp.status === 'green') return 'rgba(34, 197, 94, 0.8)';
+            if (dp.status === 'yellow') return 'rgba(234, 179, 8, 0.8)';
+            return 'rgba(239, 68, 68, 0.8)';
+        });
+
+        charts[chartKey] = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Availability',
+                    data: values,
+                    backgroundColor: colors,
+                    borderColor: colors,
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                aspectRatio: 3,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const status = data.datapoints[context.dataIndex].status;
+                                if (status === 'green') return 'Status: Healthy';
+                                if (status === 'yellow') return 'Status: Stale';
+                                return 'Status: Offline';
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 1,
+                        ticks: {
+                            callback: function(value) {
+                                if (value === 1) return 'Healthy';
+                                if (value === 0.5) return 'Stale';
+                                if (value === 0) return 'Offline';
+                                return '';
+                            }
+                        }
+                    },
+                    x: {
+                        ticks: {
+                            maxRotation: 45,
+                            minRotation: 45
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    // Change availability time range
+    function changeAvailabilityRange(hostId, hours) {
+        // Update button styles
+        document.querySelectorAll('.avail-btn').forEach(btn => {
+            if (btn.getAttribute('data-hours') === hours) {
+                btn.classList.remove('bg-gray-200');
+                btn.classList.add('bg-blue-600', 'text-white');
+            } else {
+                btn.classList.remove('bg-blue-600', 'text-white');
+                btn.classList.add('bg-gray-200');
+            }
+        });
+
+        // Reload availability with new range
+        loadAvailability(hostId, hours);
     }
 
     // Execute action on service

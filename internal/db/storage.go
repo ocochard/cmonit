@@ -251,6 +251,14 @@ func StoreHost(db *sql.DB, server *parser.Server, platform *parser.Platform, sys
 		log.Printf("[DEBUG] Stored host: %s (ID: %s, Monit uptime: %d)", server.LocalHostname, hostID, server.Uptime)
 	}
 
+	// Record host availability for time-series graphing
+	// This tracks the heartbeat - every successful data reception is recorded
+	err = RecordHostAvailability(db, hostID, now.Unix(), int64(server.Poll))
+	if err != nil {
+		log.Printf("[WARN] Failed to record availability for %s: %v", hostID, err)
+		// Don't fail the whole operation if availability recording fails
+	}
+
 	// Return nil (no error)
 	return nil
 }
@@ -293,6 +301,156 @@ func StoreEvent(db *sql.DB, hostID, serviceName string, eventType int, message s
 	}
 
 	log.Printf("[INFO] Created event: %s/%s - %s", hostID, serviceName, message)
+	return nil
+}
+
+// RecordHostAvailability records a host availability data point for time-series graphing.
+//
+// This function is called every time we receive data from a Monit agent, creating
+// a time-series record of host health. The status is determined by comparing
+// the time since last contact with the poll interval:
+//   - green: last_seen < poll_interval * 2 (healthy, reporting on time)
+//   - yellow: last_seen between poll_interval * 2 and * 4 (warning, delayed)
+//   - red: last_seen > poll_interval * 4 (offline, not reporting)
+//
+// Parameters:
+//   - db: Database connection
+//   - hostID: The host identifier
+//   - timestamp: Unix timestamp of this data point
+//   - pollInterval: The Monit poll interval in seconds
+//
+// Returns:
+//   - error: nil if successful, error if failed
+//
+// Example usage:
+//   RecordHostAvailability(db, "host123", time.Now().Unix(), 60)
+func RecordHostAvailability(db *sql.DB, hostID string, timestamp int64, pollInterval int64) error {
+	// Get the last_seen time from the hosts table to calculate status
+	var lastSeen int64
+	err := db.QueryRow("SELECT CAST(strftime('%s', last_seen) AS INTEGER) FROM hosts WHERE id = ?", hostID).Scan(&lastSeen)
+	if err != nil {
+		return fmt.Errorf("failed to get host last_seen: %w", err)
+	}
+
+	// Calculate seconds since last contact
+	now := time.Now().Unix()
+	secondsSinceLastSeen := now - lastSeen
+
+	// Determine status based on heartbeat timing
+	// Green = healthy (within 2x poll interval)
+	// Yellow = warning (between 2x and 4x poll interval)
+	// Red = offline (more than 4x poll interval)
+	var status string
+	if secondsSinceLastSeen < (pollInterval * 2) {
+		status = "green"
+	} else if secondsSinceLastSeen < (pollInterval * 4) {
+		status = "yellow"
+	} else {
+		status = "red"
+	}
+
+	// Insert availability record
+	const query = `
+		INSERT INTO host_availability (
+			host_id,
+			timestamp,
+			status,
+			last_seen,
+			poll_interval
+		) VALUES (?, ?, ?, ?, ?)
+	`
+
+	_, err = db.Exec(query, hostID, timestamp, status, lastSeen, pollInterval)
+	if err != nil {
+		return fmt.Errorf("failed to record host availability: %w", err)
+	}
+
+	if debugMode {
+		log.Printf("[DEBUG] Recorded availability for %s: status=%s, last_seen=%d, poll_interval=%d",
+			hostID, status, lastSeen, pollInterval)
+	}
+
+	return nil
+}
+
+// RecordAvailabilityForAllHosts records availability status for all hosts in the database.
+//
+// This function is called periodically (every 60 seconds) by the background job
+// in main.go. It ensures we continue recording availability data even when hosts
+// are not actively sending updates (e.g., when they're offline).
+//
+// For each host in the database, this function:
+// 1. Retrieves the host's last_seen and poll_interval
+// 2. Calculates the current availability status (green/yellow/red)
+// 3. Records a new availability data point
+//
+// This creates a complete time-series of availability, including periods when
+// hosts are offline and not sending data.
+//
+// Parameters:
+//   - db: Database connection
+//
+// Returns:
+//   - error: nil if successful, error if failed
+//
+// Example status calculation:
+//   - Host last seen 30 seconds ago, poll=60s  -> green (30 < 120)
+//   - Host last seen 150 seconds ago, poll=60s -> yellow (120 <= 150 < 240)
+//   - Host last seen 300 seconds ago, poll=60s -> red (300 >= 240)
+func RecordAvailabilityForAllHosts(db *sql.DB) error {
+	// Query all hosts with their poll intervals
+	const query = `
+		SELECT id, CAST(strftime('%s', last_seen) AS INTEGER) as last_seen, poll_interval
+		FROM hosts
+		WHERE poll_interval > 0
+	`
+
+	rows, err := db.Query(query)
+	if err != nil {
+		return fmt.Errorf("failed to query hosts: %w", err)
+	}
+	defer rows.Close()
+
+	// Get current timestamp
+	now := time.Now().Unix()
+
+	// Counter for successfully recorded hosts
+	recordedCount := 0
+	errorCount := 0
+
+	// Iterate through all hosts
+	for rows.Next() {
+		var hostID string
+		var lastSeen int64
+		var pollInterval int64
+
+		err := rows.Scan(&hostID, &lastSeen, &pollInterval)
+		if err != nil {
+			log.Printf("[WARN] Failed to scan host row: %v", err)
+			errorCount++
+			continue
+		}
+
+		// Record availability for this host
+		err = RecordHostAvailability(db, hostID, now, pollInterval)
+		if err != nil {
+			log.Printf("[WARN] Failed to record availability for host %s: %v", hostID, err)
+			errorCount++
+			continue
+		}
+
+		recordedCount++
+	}
+
+	// Check for errors during row iteration
+	if err = rows.Err(); err != nil {
+		return fmt.Errorf("error iterating hosts: %w", err)
+	}
+
+	if debugMode {
+		log.Printf("[DEBUG] Recorded availability for %d hosts (%d errors)", recordedCount, errorCount)
+	}
+
 	return nil
 }
 

@@ -21,6 +21,10 @@
 # cmonit_syslog (string):       Syslog facility (daemon, local0-local7).
 #                               Default is "daemon" (use syslog).
 #                               Set to empty "" to log to stderr.
+# cmonit_collector_user (string):   Collector HTTP Basic Auth username.
+#                                   Default is "monit".
+# cmonit_collector_password (string): Collector HTTP Basic Auth password.
+#                                     Default is "monit".
 
 . /etc/rc.subr
 
@@ -36,10 +40,12 @@ load_rc_config $name
 : ${cmonit_db:="/var/run/cmonit/cmonit.db"}
 : ${cmonit_pidfile:="/var/run/cmonit/cmonit.pid"}
 : ${cmonit_syslog:="daemon"}
+: ${cmonit_collector_user:="monit"}
+: ${cmonit_collector_password:="monit"}
 
 pidfile="${cmonit_pidfile}"
 command="/usr/local/bin/${name}"
-command_args="-collector ${cmonit_collector} -listen ${cmonit_listen} -db ${cmonit_db} -pidfile ${cmonit_pidfile}"
+command_args="-collector ${cmonit_collector} -listen ${cmonit_listen} -db ${cmonit_db} -pidfile ${cmonit_pidfile} -collector-user ${cmonit_collector_user} -collector-password ${cmonit_collector_password}"
 
 # Add syslog facility if specified
 if [ -n "${cmonit_syslog}" ]; then

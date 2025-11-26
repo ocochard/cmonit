@@ -124,10 +124,10 @@ func main() {
 	debugFlag := flag.Bool("debug", false,
 		"Enable verbose DEBUG logging for troubleshooting")
 
-	collectorUser := flag.String("user", "monit",
+	collectorUser := flag.String("collector-user", "monit",
 		"Collector HTTP Basic Auth username (Monit agents must use this)")
 
-	collectorPassword := flag.String("password", "monit",
+	collectorPassword := flag.String("collector-password", "monit",
 		"Collector HTTP Basic Auth password (Monit agents must use this)")
 
 	daemonMode := flag.Bool("daemon", false,

@@ -88,7 +88,7 @@ go build -o cmonit ./cmd/cmonit
 ./cmonit -daemon
 
 # Custom collector credentials (Monit agents must match)
-./cmonit -user myuser -password mypassword
+./cmonit -collector-user myuser -collector-password mypassword
 
 # With HTTP Basic Authentication
 ./cmonit -web-user admin -web-password secretpass
@@ -119,10 +119,10 @@ go build -o cmonit ./cmd/cmonit
   -pidfile string
         PID file path (default "/var/run/cmonit/cmonit.pid")
 
-  -user string
+  -collector-user string
         Collector HTTP Basic Auth username - Monit agents must use this (default "monit")
 
-  -password string
+  -collector-password string
         Collector HTTP Basic Auth password - Monit agents must use this (default "monit")
 
   -daemon
@@ -191,14 +191,14 @@ set httpd port 2812 and
 
 Replace `cmonit-server` with the hostname or IP where cmonit is running.
 
-**Note**: The default collector credentials are `monit:monit`. If you change them using `-user` and `-password` flags, update all Monit agents accordingly.
+**Note**: The default collector credentials are `monit:monit`. If you change them using `-collector-user` and `-collector-password` flags, update all Monit agents accordingly.
 
 Example:
 ```bash
 # Default credentials
 set mmonit http://monit:monit@192.168.1.100:8080/collector
 
-# Custom credentials (if cmonit started with -user myuser -password mypass)
+# Custom credentials (if cmonit started with -collector-user myuser -collector-password mypass)
 set mmonit http://myuser:mypass@192.168.1.100:8080/collector
 
 # Local connection

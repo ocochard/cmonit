@@ -325,7 +325,7 @@ func StoreEvent(db *sql.DB, hostID, serviceName string, eventType int, message s
 // Example usage:
 //   RecordHostAvailability(db, "host123", time.Now().Unix(), 60)
 func RecordHostAvailability(db *sql.DB, hostID string, timestamp int64, pollInterval int64) error {
-	// Get the last_seen time from the hosts table to calculate status
+	// Get the last_seen time from the hosts table to check connectivity
 	var lastSeen int64
 	err := db.QueryRow("SELECT CAST(strftime('%s', last_seen) AS INTEGER) FROM hosts WHERE id = ?", hostID).Scan(&lastSeen)
 	if err != nil {
@@ -336,17 +336,47 @@ func RecordHostAvailability(db *sql.DB, hostID string, timestamp int64, pollInte
 	now := time.Now().Unix()
 	secondsSinceLastSeen := now - lastSeen
 
-	// Determine status based on heartbeat timing
-	// Green = healthy (within 2x poll interval)
-	// Yellow = warning (between 2x and 4x poll interval)
-	// Red = offline (more than 4x poll interval)
 	var status string
-	if secondsSinceLastSeen < (pollInterval * 2) {
-		status = "green"
-	} else if secondsSinceLastSeen < (pollInterval * 4) {
-		status = "yellow"
-	} else {
+
+	// First check if host is offline (no recent contact)
+	// Red = offline (more than 4x poll interval)
+	if secondsSinceLastSeen >= (pollInterval * 4) {
 		status = "red"
+	} else {
+		// Host is online, now check service health statuses
+		// Query all services for this host and check their status values
+		var serviceCount int
+		var nonZeroStatusCount int
+
+		err = db.QueryRow(`
+			SELECT
+				COUNT(*) as total,
+				COUNT(CASE WHEN status != 0 THEN 1 END) as non_zero
+			FROM services
+			WHERE host_id = ?
+		`, hostID).Scan(&serviceCount, &nonZeroStatusCount)
+
+		if err != nil {
+			return fmt.Errorf("failed to query service statuses: %w", err)
+		}
+
+		// Determine overall health status based on service statuses
+		// Green = all services healthy (status=0)
+		// Yellow = at least one service has a warning/error (status!=0)
+		if serviceCount == 0 {
+			// No services found, use connectivity-based status
+			if secondsSinceLastSeen < (pollInterval * 2) {
+				status = "green"
+			} else {
+				status = "yellow"
+			}
+		} else if nonZeroStatusCount > 0 {
+			// At least one service has a non-zero status (warning or error)
+			status = "yellow"
+		} else {
+			// All services are healthy (status=0)
+			status = "green"
+		}
 	}
 
 	// Insert availability record

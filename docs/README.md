@@ -296,9 +296,12 @@ See `internal/web/mmonit_api.go` for implementation details.
 
 ## Configuration Options
 
-All configuration via command-line flags:
+cmonit supports two configuration methods:
+
+### 1. Command-Line Flags (Quick/Simple)
 
 ```
+-config       Configuration file path (optional, TOML format)
 -collector    Collector port number (default "8080") - inherits IP from -listen
 -listen       Web UI listen address (default "localhost:3000")
 -db           Database path (default "/var/run/cmonit/cmonit.db")
@@ -309,6 +312,18 @@ All configuration via command-line flags:
 -web-cert     TLS certificate file (empty = HTTP only)
 -web-key      TLS key file
 ```
+
+### 2. Configuration File (Production/Complex)
+
+For production deployments, use a TOML configuration file:
+
+```bash
+./cmonit -config /etc/cmonit/cmonit.conf
+```
+
+**Priority:** CLI flags > Config file > Defaults
+
+See `cmonit.conf.sample` in the repository root for a complete example.
 
 ---
 

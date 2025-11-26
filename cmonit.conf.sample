@@ -1,0 +1,77 @@
+# cmonit Configuration File
+#
+# This is an example TOML configuration file for cmonit.
+# Copy this file to /etc/cmonit/cmonit.conf and customize for your needs.
+#
+# Usage:
+#   ./cmonit -config /etc/cmonit/cmonit.conf
+#
+# All settings are optional - CLI flags override config file values.
+# If neither config file nor CLI flag is provided, built-in defaults are used.
+
+# Network Configuration
+[network]
+# Web UI listen address (host:port)
+# The collector inherits the IP address from this setting
+# Default: "localhost:3000"
+listen = "0.0.0.0:3000"
+
+# Collector port number (inherits IP from listen address)
+# Default: "8080"
+collector_port = "8080"
+
+# Collector Authentication
+[collector]
+# HTTP Basic Auth credentials for the collector endpoint
+# Monit agents must use these credentials to send data
+# Default: user = "monit", password = "monit"
+user = "monit"
+password = "monit"
+
+# Web UI Configuration
+[web]
+# HTTP Basic Auth for the web dashboard
+# Leave empty to disable authentication (not recommended for production)
+# Default: empty (authentication disabled)
+# Uncomment to enable:
+# user = "admin"
+# password = "secretpassword"
+user = ""
+password = ""
+
+# TLS/HTTPS configuration
+# Leave empty to use HTTP (not recommended for production)
+# Default: empty (HTTP only)
+# Uncomment and set paths to enable HTTPS:
+# cert = "/etc/cmonit/ssl/cert.pem"
+# key = "/etc/cmonit/ssl/key.pem"
+cert = ""
+key = ""
+
+# Storage Configuration
+[storage]
+# SQLite database file path
+# Default: "/var/run/cmonit/cmonit.db"
+database = "/var/run/cmonit/cmonit.db"
+
+# PID file path
+# Default: "/var/run/cmonit/cmonit.pid"
+pidfile = "/var/run/cmonit/cmonit.pid"
+
+# Logging Configuration
+[logging]
+# Syslog facility for daemon logging
+# Options: "daemon", "local0", "local1", ..., "local7"
+# Leave empty to log to stderr
+# Default: empty (stderr logging)
+syslog = "daemon"
+
+# Enable debug logging
+# Default: false
+debug = false
+
+# Process Configuration
+[process]
+# Run as background daemon
+# Default: false
+daemon = false

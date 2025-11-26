@@ -35,6 +35,7 @@ import (
 
 	// Internal packages (our code)
 	// These are relative to the module path (github.com/ocochard/cmonit)
+	"github.com/ocochard/cmonit/internal/config" // Configuration file support
 	"github.com/ocochard/cmonit/internal/db"     // Database operations
 	"github.com/ocochard/cmonit/internal/parser" // XML parser
 	"github.com/ocochard/cmonit/internal/web"    // Web UI handlers
@@ -133,6 +134,9 @@ func main() {
 	daemonMode := flag.Bool("daemon", false,
 		"Run in background as a daemon process")
 
+	configFile := flag.String("config", "",
+		"Configuration file path (TOML format, optional)")
+
 	// Parse command-line flags
 	//
 	// flag.Parse() processes os.Args (command-line arguments)
@@ -144,6 +148,38 @@ func main() {
 	//   ./cmonit -listen [::]:3000              # IPv6 all interfaces
 	//   ./cmonit -collector 9000 -listen :4000  # Custom ports
 	flag.Parse()
+
+	// Load configuration file if specified
+	//
+	// Config file provides defaults, CLI flags override them
+	// Priority: CLI flags > Config file > Built-in defaults
+	if *configFile != "" {
+		cfg, err := config.Load(*configFile)
+		if err != nil {
+			log.Fatalf("[FATAL] Failed to load config file: %v", err)
+		}
+
+		log.Printf("[INFO] Loaded configuration from: %s", *configFile)
+
+		// Merge config file values with CLI flags
+		// CLI flags take priority if they differ from defaults
+		//
+		// We merge each setting, checking if the CLI flag was explicitly set
+		// (differs from default) or if we should use the config file value
+		*collectorAddr = config.MergeString(cfg.Network.CollectorPort, *collectorAddr, "8080")
+		*webAddr = config.MergeString(cfg.Network.Listen, *webAddr, "localhost:3000")
+		*collectorUser = config.MergeString(cfg.Collector.User, *collectorUser, "monit")
+		*collectorPassword = config.MergeString(cfg.Collector.Password, *collectorPassword, "monit")
+		*webUser = config.MergeString(cfg.Web.User, *webUser, "")
+		*webPassword = config.MergeString(cfg.Web.Password, *webPassword, "")
+		*webCert = config.MergeString(cfg.Web.Cert, *webCert, "")
+		*webKey = config.MergeString(cfg.Web.Key, *webKey, "")
+		*dbPath = config.MergeString(cfg.Storage.Database, *dbPath, "/var/run/cmonit/cmonit.db")
+		*pidFile = config.MergeString(cfg.Storage.PidFile, *pidFile, "/var/run/cmonit/cmonit.pid")
+		*syslogFacility = config.MergeString(cfg.Logging.Syslog, *syslogFacility, "")
+		*debugFlag = config.MergeBool(cfg.Logging.Debug, *debugFlag)
+		*daemonMode = config.MergeBool(cfg.Process.Daemon, *daemonMode)
+	}
 
 	// Process collector address to inherit IP from -listen
 	//

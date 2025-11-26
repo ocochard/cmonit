@@ -53,6 +53,8 @@ go build -o cmonit ./cmd/cmonit
 
 ### Run
 
+#### Quick Start (CLI only)
+
 ```bash
 # Default: collector on localhost:8080, web on localhost:3000
 ./cmonit
@@ -100,9 +102,68 @@ go build -o cmonit ./cmd/cmonit
 ./cmonit -listen 0.0.0.0:3000 -web-user admin -web-password secretpass -web-cert /path/to/cert.pem -web-key /path/to/key.pem
 ```
 
+#### Configuration File (Production/Complex Deployments)
+
+For production environments or complex configurations, use a TOML configuration file:
+
+```bash
+# Create config file
+cp cmonit.conf.sample /etc/cmonit/cmonit.conf
+vim /etc/cmonit/cmonit.conf
+
+# Run with config file
+./cmonit -config /etc/cmonit/cmonit.conf
+
+# Override specific settings with CLI flags (CLI takes priority)
+./cmonit -config /etc/cmonit/cmonit.conf -debug -listen 127.0.0.1:3000
+```
+
+**Example configuration file** (TOML format):
+
+```toml
+[network]
+listen = "0.0.0.0:3000"
+collector_port = "8080"
+
+[collector]
+user = "monit"
+password = "secretpassword"
+
+[web]
+user = "admin"
+password = "adminpassword"
+cert = "/etc/cmonit/ssl/cert.pem"
+key = "/etc/cmonit/ssl/key.pem"
+
+[storage]
+database = "/var/lib/cmonit/cmonit.db"
+pidfile = "/var/run/cmonit/cmonit.pid"
+
+[logging]
+syslog = "daemon"
+debug = false
+
+[process]
+daemon = true
+```
+
+**Benefits:**
+- Organized, grouped settings
+- Version control friendly
+- Comments for documentation
+- Easier to manage complex configurations
+- CLI flags still work (and override config file)
+
+See `cmonit.conf.sample` for a fully documented configuration file.
+
 ### Command-Line Options
 
 ```
+  -config string
+        Configuration file path (TOML format, optional)
+        Example: /etc/cmonit/cmonit.conf
+        Note: CLI flags override config file settings
+
   -collector string
         Collector port number - inherits IP address from -listen (default "8080")
         Examples: 8080, 9000
@@ -318,6 +379,8 @@ See `rc.d/cmonit` for all configuration options.
 cmonit/
 ├── cmd/cmonit/main.go          # Entry point
 ├── internal/
+│   ├── config/
+│   │   └── config.go           # Configuration file support (TOML)
 │   ├── db/
 │   │   ├── schema.go           # Database setup
 │   │   └── storage.go          # Data storage
@@ -331,9 +394,11 @@ cmonit/
 │   └── dashboard.html          # Web UI template
 ├── rc.d/
 │   └── cmonit                  # FreeBSD rc.d script
+├── cmonit.conf.sample         # Example configuration file
 ├── docs/                       # Documentation
 ├── go.mod                      # Go dependencies
 └── cmonit.db                   # SQLite database (created at runtime)
+                                # with .db-wal and .db-shm
 ```
 
 ## Tech Stack

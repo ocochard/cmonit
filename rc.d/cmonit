@@ -12,7 +12,7 @@
 #                               Default is "root".
 # cmonit_collector (string):    Collector listen address.
 #                               Default is ":8080".
-# cmonit_web (string):          Web UI listen address.
+# cmonit_listen (string):       Web UI listen address.
 #                               Default is "localhost:3000".
 # cmonit_db (string):           Database file path.
 #                               Default is "/var/run/cmonit/cmonit.db".
@@ -32,14 +32,14 @@ load_rc_config $name
 : ${cmonit_enable:="NO"}
 : ${cmonit_user:="root"}
 : ${cmonit_collector:=":8080"}
-: ${cmonit_web:="localhost:3000"}
+: ${cmonit_listen:="localhost:3000"}
 : ${cmonit_db:="/var/run/cmonit/cmonit.db"}
 : ${cmonit_pidfile:="/var/run/cmonit/cmonit.pid"}
 : ${cmonit_syslog:="daemon"}
 
 pidfile="${cmonit_pidfile}"
 command="/usr/local/bin/${name}"
-command_args="-collector ${cmonit_collector} -web ${cmonit_web} -db ${cmonit_db} -pidfile ${cmonit_pidfile}"
+command_args="-collector ${cmonit_collector} -listen ${cmonit_listen} -db ${cmonit_db} -pidfile ${cmonit_pidfile}"
 
 # Add syslog facility if specified
 if [ -n "${cmonit_syslog}" ]; then

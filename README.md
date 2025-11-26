@@ -58,16 +58,16 @@ go build -o cmonit ./cmd/cmonit
 ./cmonit
 
 # Web accessible from all interfaces
-./cmonit -web 0.0.0.0:3000
+./cmonit -listen 0.0.0.0:3000
 
 # IPv6 support
-./cmonit -web [::]:3000
+./cmonit -listen [::]:3000
 
 # Custom ports
-./cmonit -collector :9000 -web :4000
+./cmonit -collector :9000 -listen :4000
 
 # Specific IP address
-./cmonit -web 192.168.1.10:3000
+./cmonit -listen 192.168.1.10:3000
 
 # Custom database path
 ./cmonit -db /var/db/cmonit.db
@@ -97,7 +97,7 @@ go build -o cmonit ./cmd/cmonit
 ./cmonit -web-cert /path/to/cert.pem -web-key /path/to/key.pem
 
 # Production: Authentication + TLS
-./cmonit -web 0.0.0.0:3000 -web-user admin -web-password secretpass -web-cert /path/to/cert.pem -web-key /path/to/key.pem
+./cmonit -listen 0.0.0.0:3000 -web-user admin -web-password secretpass -web-cert /path/to/cert.pem -web-key /path/to/key.pem
 ```
 
 ### Command-Line Options
@@ -107,7 +107,7 @@ go build -o cmonit ./cmd/cmonit
         Collector listen address (default ":8080")
         Examples: :8080, localhost:8080, 0.0.0.0:8080, [::]:8080
 
-  -web string
+  -listen string
         Web UI listen address (default "localhost:3000")
         Examples: localhost:3000, 0.0.0.0:3000, [::]:3000, 192.168.1.10:3000
 
@@ -246,7 +246,7 @@ Recommended production configuration:
 
 ```bash
 ./cmonit \
-  -web 0.0.0.0:3000 \
+  -listen 0.0.0.0:3000 \
   -web-user admin \
   -web-password "$(cat /etc/cmonit/password)" \
   -web-cert /etc/cmonit/cert.pem \
@@ -294,7 +294,7 @@ sudo chmod +x /usr/local/etc/rc.d/cmonit
 # Configure in /etc/rc.conf
 sudo sysrc cmonit_enable="YES"
 sudo sysrc cmonit_collector=":8080"
-sudo sysrc cmonit_web="0.0.0.0:3000"
+sudo sysrc cmonit_listen="0.0.0.0:3000"
 sudo sysrc cmonit_db="/var/run/cmonit/cmonit.db"
 sudo sysrc cmonit_pidfile="/var/run/cmonit/cmonit.pid"
 sudo sysrc cmonit_syslog="daemon"

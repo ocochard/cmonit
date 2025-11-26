@@ -193,7 +193,7 @@ go test ./internal/parser/
 
 ```bash
 # Development mode (current directory)
-./cmonit -db ./cmonit.db -pidfile ./cmonit.pid -web localhost:3000
+./cmonit -db ./cmonit.db -pidfile ./cmonit.pid -listen localhost:3000
 
 # Clean start
 rm -f cmonit.db cmonit.db-* cmonit.pid
@@ -300,7 +300,7 @@ All configuration via command-line flags:
 
 ```
 -collector    Collector listen address (default ":8080")
--web          Web UI listen address (default "localhost:3000")
+-listen       Web UI listen address (default "localhost:3000")
 -db           Database path (default "/var/run/cmonit/cmonit.db")
 -pidfile      PID file path (default "/var/run/cmonit/cmonit.pid")
 -syslog       Syslog facility (daemon, local0-7, empty for stderr)
@@ -335,7 +335,7 @@ sudo chmod +x /usr/local/etc/rc.d/cmonit
 
 # Configure in rc.conf
 sudo sysrc cmonit_enable="YES"
-sudo sysrc cmonit_web="0.0.0.0:3000"
+sudo sysrc cmonit_listen="0.0.0.0:3000"
 sudo sysrc cmonit_syslog="daemon"
 
 # Start service

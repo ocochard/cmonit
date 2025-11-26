@@ -97,7 +97,7 @@ func main() {
 	collectorAddr := flag.String("collector", ":8080",
 		"Collector listen address (e.g., :8080, localhost:8080, 0.0.0.0:8080, [::]:8080)")
 
-	webAddr := flag.String("web", "localhost:3000",
+	webAddr := flag.String("listen", "localhost:3000",
 		"Web UI listen address (e.g., localhost:3000, 0.0.0.0:3000, [::]:3000, 192.168.1.10:3000)")
 
 	webUser := flag.String("web-user", "",
@@ -139,10 +139,10 @@ func main() {
 	// After this call, *collectorAddr and *webAddr contain the values
 	//
 	// Example usage:
-	//   ./cmonit                              # Use defaults
-	//   ./cmonit -web 0.0.0.0:3000           # Web accessible from anywhere
-	//   ./cmonit -web [::]:3000              # IPv6 all interfaces
-	//   ./cmonit -collector :9000 -web :4000 # Custom ports
+	//   ./cmonit                                 # Use defaults
+	//   ./cmonit -listen 0.0.0.0:3000           # Web accessible from anywhere
+	//   ./cmonit -listen [::]:3000              # IPv6 all interfaces
+	//   ./cmonit -collector :9000 -listen :4000 # Custom ports
 	flag.Parse()
 
 	// Handle daemon mode

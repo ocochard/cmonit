@@ -509,6 +509,10 @@ func main() {
 	// Used by Chart.js to draw availability status graphs showing green/yellow/red status
 	webMux.HandleFunc("/api/availability", web.HandleAvailabilityAPI)
 
+	// /api/host/description updates the description field for a host
+	// Allows users to add custom HTML notes for each host
+	webMux.HandleFunc("/api/host/description", web.HandleUpdateDescription)
+
 	// M/Monit-compatible API endpoints
 	//
 	// These endpoints provide M/Monit HTTP API compatibility

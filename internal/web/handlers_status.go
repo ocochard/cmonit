@@ -164,7 +164,7 @@ func getStatusData() (*StatusData, error) {
 func getHostDetailData(hostID string) (*DashboardData, error) {
 	const hostQuery = `
 		SELECT id, hostname, version, os_name, os_release, machine,
-		       cpu_count, total_memory, total_swap, system_uptime, boottime, last_seen, poll_interval
+		       cpu_count, total_memory, total_swap, system_uptime, boottime, last_seen, poll_interval, description
 		FROM hosts
 		WHERE id = ?
 	`
@@ -185,6 +185,7 @@ func getHostDetailData(hostID string) (*DashboardData, error) {
 		&host.Boottime,
 		&host.LastSeen,
 		&host.PollInterval,
+		&host.Description,
 	)
 	if err != nil {
 		return nil, err

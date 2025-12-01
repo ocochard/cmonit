@@ -780,3 +780,114 @@ func getRemoteHostMetricsForGraph(hostID, service string, startTime, endTime tim
 
 	return result, nil
 }
+
+// =============================================================================
+// HOST DESCRIPTION API
+// =============================================================================
+
+// UpdateDescriptionRequest represents the JSON request for updating host description.
+type UpdateDescriptionRequest struct {
+	HostID      string `json:"host_id"`      // Host identifier
+	Description string `json:"description"`  // HTML description content
+}
+
+// UpdateDescriptionResponse represents the JSON response for description updates.
+type UpdateDescriptionResponse struct {
+	Success bool   `json:"success"` // Whether the update succeeded
+	Message string `json:"message"` // Success or error message
+}
+
+// HandleUpdateDescription handles POST requests to update a host's description.
+//
+// URL format:
+//   POST /api/host/description
+//
+// Request body (JSON):
+//   {
+//     "host_id": "host-identifier",
+//     "description": "<p>HTML content here</p>"
+//   }
+//
+// Response (JSON):
+//   {
+//     "success": true,
+//     "message": "Description updated successfully"
+//   }
+//
+// This endpoint allows users to add custom HTML notes/descriptions for each host.
+// HTML content is allowed to support rich formatting (lists, links, etc.).
+func HandleUpdateDescription(w http.ResponseWriter, r *http.Request) {
+	// Only allow POST requests
+	if r.Method != http.MethodPost {
+		respondJSON(w, UpdateDescriptionResponse{
+			Success: false,
+			Message: "Method not allowed",
+		}, http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse JSON request body
+	var req UpdateDescriptionRequest
+	err := json.NewDecoder(r.Body).Decode(&req)
+	if err != nil {
+		respondJSON(w, UpdateDescriptionResponse{
+			Success: false,
+			Message: "Invalid JSON",
+		}, http.StatusBadRequest)
+		return
+	}
+
+	// Validate required parameters
+	if req.HostID == "" {
+		respondJSON(w, UpdateDescriptionResponse{
+			Success: false,
+			Message: "Missing host_id",
+		}, http.StatusBadRequest)
+		return
+	}
+
+	// Update description in database
+	// Note: description can be empty (to clear the description)
+	const query = `
+		UPDATE hosts
+		SET description = ?
+		WHERE id = ?
+	`
+
+	result, err := db.Exec(query, req.Description, req.HostID)
+	if err != nil {
+		log.Printf("[ERROR] Failed to update description for host %s: %v", req.HostID, err)
+		respondJSON(w, UpdateDescriptionResponse{
+			Success: false,
+			Message: "Failed to update description",
+		}, http.StatusInternalServerError)
+		return
+	}
+
+	// Check if the host exists
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		log.Printf("[ERROR] Failed to get rows affected: %v", err)
+		respondJSON(w, UpdateDescriptionResponse{
+			Success: false,
+			Message: "Failed to verify update",
+		}, http.StatusInternalServerError)
+		return
+	}
+
+	if rowsAffected == 0 {
+		respondJSON(w, UpdateDescriptionResponse{
+			Success: false,
+			Message: "Host not found",
+		}, http.StatusNotFound)
+		return
+	}
+
+	// Success!
+	log.Printf("[INFO] Updated description for host %s (%d bytes)", req.HostID, len(req.Description))
+
+	respondJSON(w, UpdateDescriptionResponse{
+		Success: true,
+		Message: "Description updated successfully",
+	}, http.StatusOK)
+}

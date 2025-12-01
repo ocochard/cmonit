@@ -39,7 +39,7 @@ import (
 
 // currentSchemaVersion is the current database schema version.
 // Increment this when making schema changes that require migration.
-const currentSchemaVersion = 9
+const currentSchemaVersion = 10
 
 // SQL schema for the cmonit database
 //
@@ -103,6 +103,7 @@ const (
 	//   - poll_interval: Monit's check interval in seconds (for heartbeat health status)
 	//   - last_seen: When we last received data from this host
 	//   - created_at: When we first saw this host
+	//   - description: User-defined HTML description/notes for this host
 	//
 	// PRIMARY KEY: id must be unique (enforced by SQLite)
 	// UNIQUE: hostname must be unique (one entry per server)
@@ -135,6 +136,7 @@ const (
 		poll_interval INTEGER DEFAULT 30,
 		last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		description TEXT DEFAULT '',
 		UNIQUE(hostname)
 	);`
 
@@ -1128,6 +1130,23 @@ func migrateSchema(db *sql.DB, fromVersion, toVersion int) error {
 				return err
 			}
 			log.Printf("[INFO] Successfully migrated to schema version 9")
+
+		case 9:
+			// Migration from version 9 to version 10
+			// Add description field to hosts table for user-defined HTML notes
+			log.Printf("[INFO] Migrating from v9 to v10: Adding description column to hosts table")
+
+			_, err := db.Exec("ALTER TABLE hosts ADD COLUMN description TEXT DEFAULT ''")
+			if err != nil {
+				return fmt.Errorf("migration v9->v10 failed: %w", err)
+			}
+
+			fromVersion = 10
+			err = setSchemaVersion(db, fromVersion)
+			if err != nil {
+				return err
+			}
+			log.Printf("[INFO] Successfully migrated to schema version 10")
 
 		default:
 			return fmt.Errorf("no migration path from version %d", fromVersion)

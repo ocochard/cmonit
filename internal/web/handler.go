@@ -54,6 +54,7 @@ type HostWithServices struct {
 	HealthEmoji   string    // Health status emoji: 🟢, 🟡, 🔴
 	HealthLabel   string    // Health status label: "Healthy", "Warning", "Offline"
 	LastSeenText  string    // Human-readable "last seen" text (e.g., "5 minutes ago")
+	Description   string    // User-defined HTML description/notes for this host
 }
 
 // Service represents a monitored service.

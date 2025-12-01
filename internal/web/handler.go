@@ -10,6 +10,7 @@ package web
 
 import (
 	"database/sql"  // Database access
+	"embed"         // Embed static files
 	"fmt"           // String formatting
 	"html/template" // HTML templating
 	"log"           // Logging
@@ -245,6 +246,9 @@ type RemoteHostMetrics struct {
 // GLOBAL VARIABLES
 // =============================================================================
 
+//go:embed templates/*.html
+var templatesFS embed.FS
+
 // templates holds parsed HTML templates.
 //
 // template.Template represents a parsed HTML template.
@@ -363,14 +367,14 @@ func InitTemplates() error {
 	//
 	// template.New creates a new template with the given name
 	// .Funcs adds custom functions to the template
-	// .ParseGlob loads all matching files
+	// .ParseFS loads all matching files from the embedded filesystem
 	var err error
-	templates, err = template.New("").Funcs(funcMap).ParseGlob("templates/*.html")
+	templates, err = template.New("").Funcs(funcMap).ParseFS(templatesFS, "templates/*.html")
 	if err != nil {
 		return err
 	}
 
-	log.Printf("[INFO] Loaded HTML templates from templates/")
+	log.Printf("[INFO] Loaded HTML templates from embedded filesystem")
 	return nil
 }
 

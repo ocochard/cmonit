@@ -37,7 +37,8 @@ All planned phases have been successfully completed:
 **Backend:**
 - **Go 1.21+** - Single binary, excellent concurrency
 - **SQLite** - Embedded database with WAL mode
-- **Standard library** - `net/http`, `html/template`, `encoding/xml`
+- **Standard library** - `net/http`, `html/template`, `encoding/xml`, `embed`
+- **Embedded templates** - HTML templates compiled into binary (no external files needed)
 
 **Frontend:**
 - **Tailwind CSS** - Utility-first CSS framework (CDN)
@@ -63,8 +64,8 @@ flowchart TB
     DB2 --> Query
     DB3 --> Query
 
-    Query -->|"web.HandleStatus()"| Dashboard["Dashboard Template<br/>templates/dashboard.html"]
-    Query -->|"web.HandleServiceDetail()"| Service["Service Detail Template<br/>templates/service.html"]
+    Query -->|"web.HandleStatus()"| Dashboard["Dashboard Template<br/>embedded in binary"]
+    Query -->|"web.HandleServiceDetail()"| Service["Service Detail Template<br/>embedded in binary"]
 
     Dashboard -->|Rendered HTML| Browser[User Browser]
     Service -->|Rendered HTML| Browser
@@ -102,7 +103,7 @@ flowchart TB
 - **Collector** (port 8080) - Receives data from Monit agents
 - **Web UI** (port 3000) - Serves dashboard to users
 - **Database** - Central storage with automatic schema migrations
-- **Templates** - Server-side rendering with no JavaScript build step
+- **Templates** - Embedded in binary using Go's `embed` package, no external files needed
 
 ### Project Structure
 
@@ -120,10 +121,12 @@ cmonit/
 │       ├── handler.go           # Dashboard HTTP handlers
 │       ├── handlers_status.go   # Service detail handlers
 │       ├── api.go               # Metrics & action APIs
-│       └── mmonit_api.go        # M/Monit compatibility API
-├── templates/
-│   ├── dashboard.html           # Main dashboard template
-│   └── service.html             # Service detail template
+│       ├── mmonit_api.go        # M/Monit compatibility API
+│       └── templates/           # HTML templates (embedded in binary)
+│           ├── dashboard.html   # Main dashboard template
+│           ├── service.html     # Service detail template
+│           ├── status.html      # Status overview template
+│           └── events.html      # Events page template
 ├── rc.d/cmonit                  # FreeBSD startup script
 └── docs/                        # Developer documentation
 ```
@@ -169,11 +172,14 @@ cmonit/
 ### Building
 
 ```bash
-# Standard build
+# Standard build (templates are automatically embedded)
 go build -o cmonit ./cmd/cmonit
 
 # With version info
 go build -ldflags "-X main.version=1.0.0" -o cmonit ./cmd/cmonit
+
+# The resulting binary is self-contained and includes all HTML templates
+# No external files are needed - just copy the binary to deploy
 ```
 
 ### Testing
@@ -344,6 +350,7 @@ Based on testing with 2 hosts, 13 services:
 
 ```bash
 # Install binary and rc.d script
+# Note: The binary is self-contained with embedded templates
 sudo cp cmonit /usr/local/bin/
 sudo cp rc.d/cmonit /usr/local/etc/rc.d/
 sudo chmod +x /usr/local/etc/rc.d/cmonit
@@ -356,6 +363,8 @@ sudo sysrc cmonit_syslog="daemon"
 # Start service
 sudo service cmonit start
 ```
+
+**Important:** Since version 1.0, HTML templates are embedded in the binary using Go's `embed` package. You only need to copy the `cmonit` binary - no template files or directories are required for deployment.
 
 See `rc.d/cmonit` for all configuration options.
 

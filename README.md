@@ -48,7 +48,11 @@ Open Source central monitoring dashboard for Monit: collect status, graph metric
 ### Build
 
 ```bash
+# Build - templates are automatically embedded in the binary
 go build -o cmonit ./cmd/cmonit
+
+# The resulting binary is self-contained and ready to deploy
+# No external files (templates, assets) are needed
 ```
 
 ### Run
@@ -108,14 +112,14 @@ For production environments or complex configurations, use a TOML configuration 
 
 ```bash
 # Create config file
-cp cmonit.conf.sample /etc/cmonit/cmonit.conf
-vim /etc/cmonit/cmonit.conf
+cp cmonit.conf.sample /usr/local/etc/cmonit.conf
+vim /usr/local/etc/cmonit.conf
 
 # Run with config file
-./cmonit -config /etc/cmonit/cmonit.conf
+./cmonit -config /usr/local/etc/cmonit.conf
 
 # Override specific settings with CLI flags (CLI takes priority)
-./cmonit -config /etc/cmonit/cmonit.conf -debug -listen 127.0.0.1:3000
+./cmonit -config /usr/local/etc/cmonit.conf -debug -listen 127.0.0.1:3000
 ```
 
 **Example configuration file** (TOML format):
@@ -161,7 +165,7 @@ See `cmonit.conf.sample` for a fully documented configuration file.
 ```
   -config string
         Configuration file path (TOML format, optional)
-        Example: /etc/cmonit/cmonit.conf
+        Example: /usr/local/etc/cmonit.conf
         Note: CLI flags override config file settings
 
   -collector string
@@ -349,7 +353,7 @@ go build -o cmonit ./cmd/cmonit && ./cmonit
 For FreeBSD systems, an rc.d startup script is provided:
 
 ```bash
-# Install the binary
+# Install the binary (self-contained with embedded templates)
 sudo cp cmonit /usr/local/bin/
 
 # Install the rc.d script
@@ -357,13 +361,18 @@ sudo cp rc.d/cmonit /usr/local/etc/rc.d/
 sudo chmod +x /usr/local/etc/rc.d/cmonit
 
 # Install config file (recommended)
-sudo mkdir -p /etc/cmonit
-sudo cp cmonit.conf.sample /etc/cmonit/cmonit.conf
-sudo vim /etc/cmonit/cmonit.conf
+# The script auto-discovers config from standard locations:
+#   1. /usr/local/etc/cmonit.conf (preferred for ports/packages)
+#   2. /etc/cmonit.conf (system-wide)
+sudo cp cmonit.conf.sample /usr/local/etc/cmonit.conf
+sudo vim /usr/local/etc/cmonit.conf
 
-# Configure in /etc/rc.conf (using config file)
+# Enable in /etc/rc.conf (auto-discovers config file)
 sudo sysrc cmonit_enable="YES"
-sudo sysrc cmonit_config="/etc/cmonit/cmonit.conf"
+
+# OR explicitly specify config file location
+sudo sysrc cmonit_enable="YES"
+sudo sysrc cmonit_config="/etc/cmonit.conf"
 
 # OR configure with individual flags (without config file)
 sudo sysrc cmonit_enable="YES"
@@ -378,15 +387,22 @@ sudo service cmonit status
 
 **Configuration Methods:**
 
-1. **Config File (Recommended):**
+1. **Config File with Auto-Discovery (Simplest):**
+   ```bash
+   # Just enable - auto-discovers config file
+   # Searches: /usr/local/etc/cmonit.conf, then /etc/cmonit.conf
+   cmonit_enable="YES"
+   ```
+
+2. **Config File (Explicit Path):**
    ```bash
    # /etc/rc.conf
    cmonit_enable="YES"
-   cmonit_config="/etc/cmonit/cmonit.conf"
+   cmonit_config="/usr/local/etc/cmonit.conf"
    cmonit_flags="-debug"  # Optional: add extra flags
    ```
 
-2. **CLI Flags Only:**
+3. **CLI Flags Only:**
    ```bash
    # /etc/rc.conf
    cmonit_enable="YES"
@@ -411,9 +427,12 @@ cmonit/
 │   │   └── xml_test.go         # Parser tests
 │   └── web/
 │       ├── handler.go          # Dashboard handlers
-│       └── api.go              # Metrics API
-├── templates/
-│   └── dashboard.html          # Web UI template
+│       ├── api.go              # Metrics API
+│       └── templates/          # HTML templates (embedded in binary)
+│           ├── dashboard.html  # Main dashboard
+│           ├── status.html     # Status overview
+│           ├── service.html    # Service details
+│           └── events.html     # Events page
 ├── rc.d/
 │   └── cmonit                  # FreeBSD rc.d script
 ├── cmonit.conf.sample         # Example configuration file
@@ -425,10 +444,11 @@ cmonit/
 
 ## Tech Stack
 
-- **Backend**: Go 1.x
+- **Backend**: Go 1.x with embedded templates (`embed` package)
 - **Database**: SQLite with WAL mode
-- **Frontend**: HTML, Tailwind CSS, Chart.js
+- **Frontend**: HTML (server-side rendered), Tailwind CSS, Chart.js
 - **Protocol**: HTTP Basic Auth, XML
+- **Deployment**: Single self-contained binary (no external files needed)
 
 ## License
 

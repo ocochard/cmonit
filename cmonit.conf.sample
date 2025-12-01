@@ -1,10 +1,10 @@
 # cmonit Configuration File
 #
 # This is an example TOML configuration file for cmonit.
-# Copy this file to /etc/cmonit/cmonit.conf and customize for your needs.
+# Copy this file to /usr/local/etc/cmonit.conf or /etc/cmonit.conf
 #
 # Usage:
-#   ./cmonit -config /etc/cmonit/cmonit.conf
+#   ./cmonit -config /usr/local/etc/cmonit.conf
 #
 # All settings are optional - CLI flags override config file values.
 # If neither config file nor CLI flag is provided, built-in defaults are used.

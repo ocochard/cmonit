@@ -9,16 +9,19 @@
 # cmonit_enable (bool):         Set to "NO" by default.
 #                               Set it to "YES" to enable cmonit.
 # cmonit_user (string):         Set user to run cmonit.
-#                               Default is "root".
+#                               Default is "nobody".
 # cmonit_config (string):       Configuration file path (optional).
-#                               If set, uses config file instead of individual flags.
-#                               Example: "/etc/cmonit/cmonit.conf"
-#                               Default is empty (use individual flags).
+#                               If not set, automatically searches for config in:
+#                               1. /usr/local/etc/cmonit.conf
+#                               2. /etc/cmonit.conf
+#                               If found, uses config file mode.
+#                               Example: "/usr/local/etc/cmonit.conf"
+#                               Default is empty (auto-discover or use flags).
 # cmonit_flags (string):        Additional command-line flags.
 #                               Default is empty.
 #                               Example: "-debug -listen 0.0.0.0:3000"
 #
-# Legacy individual flag variables (used when cmonit_config is not set):
+# Additional variables:
 # cmonit_pidfile (string):      PID file path (default: "/var/run/cmonit/cmonit.pid")
 # cmonit_db (string):           Database path (default: "/var/run/cmonit/cmonit.db")
 #
@@ -32,7 +35,7 @@ rcvar=cmonit_enable
 load_rc_config $name
 
 : ${cmonit_enable:="NO"}
-: ${cmonit_user:="root"}
+: ${cmonit_user:="nobody"}
 : ${cmonit_config:=""}
 : ${cmonit_flags:=""}
 : ${cmonit_pidfile:="/var/run/cmonit/cmonit.pid"}
@@ -41,14 +44,26 @@ load_rc_config $name
 pidfile="${cmonit_pidfile}"
 command="/usr/local/bin/${name}"
 
+# Auto-discover config file if not explicitly set
+# Check standard FreeBSD locations in order:
+# 1. /usr/local/etc/cmonit.conf (preferred for ports/packages)
+# 2. /etc/cmonit.conf (system-wide config)
+if [ -z "${cmonit_config}" ]; then
+    if [ -f "/usr/local/etc/cmonit.conf" ]; then
+        cmonit_config="/usr/local/etc/cmonit.conf"
+    elif [ -f "/etc/cmonit.conf" ]; then
+        cmonit_config="/etc/cmonit.conf"
+    fi
+fi
+
 # Build command arguments
 if [ -n "${cmonit_config}" ]; then
     # Config file mode: use -config flag + any additional flags
-    command_args="-config ${cmonit_config} -pidfile ${cmonit_pidfile} -db ${cmonit_db} ${cmonit_flags}"
+    command_args="-config ${cmonit_config} -pidfile ${cmonit_pidfile} -db ${cmonit_db} -daemon ${cmonit_flags}"
 else
     # CLI-only mode: use -pidfile and -db, let user set everything else via cmonit_flags
     # For backward compatibility, you can still set individual flags in cmonit_flags
-    command_args="-pidfile ${cmonit_pidfile} -db ${cmonit_db} ${cmonit_flags}"
+    command_args="-pidfile ${cmonit_pidfile} -db ${cmonit_db} ${cmonit_flags} -daemon"
 fi
 
 start_precmd="${name}_prestart"

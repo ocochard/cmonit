@@ -56,8 +56,14 @@ type CollectorConfig struct {
 	User string `toml:"user"`
 
 	// Password is the HTTP Basic Auth password for collector endpoint
+	// Can be either plain text or bcrypt hash depending on PasswordFormat
 	// Monit agents must use this password to authenticate
 	Password string `toml:"password"`
+
+	// PasswordFormat specifies the format of the Password field
+	// Valid values: "plain" (default) or "bcrypt"
+	// When "bcrypt", Password should be a bcrypt hash (e.g., from cmonit -hash-password)
+	PasswordFormat string `toml:"password_format"`
 }
 
 // WebConfig contains web UI settings.

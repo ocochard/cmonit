@@ -191,6 +191,9 @@ See `cmonit.conf.sample` for a fully documented configuration file.
   -collector-password string
         Collector HTTP Basic Auth password - Monit agents must use this (default "monit")
 
+  -collector-password-format string
+        Collector password format: 'plain' or 'bcrypt' (default: plain)
+
   -daemon
         Run in background as a daemon process
 
@@ -265,16 +268,41 @@ Replace `cmonit-server` with the hostname or IP where cmonit is running.
 
 **Note**: The default collector credentials are `monit:monit`. If you change them using `-collector-user` and `-collector-password` flags, update all Monit agents accordingly.
 
-Example:
+### Collector Authentication
+
+**For production deployments**, use bcrypt hashed passwords for the collector:
+
+1. **Generate a bcrypt hash:**
 ```bash
-# Default credentials
+./cmonit -hash-password "your-collector-password"
+```
+
+2. **Add to your configuration file:**
+```toml
+[collector]
+user = "monit"
+password = "$2a$10$JbSZFwjwowrvB0WK2JE7Ge7KmlJL3LItpmsWVavJLv3WeGqu6Zq1a"
+password_format = "bcrypt"
+```
+
+3. **Update Monit agents** (they still send plain text passwords):
+```bash
+# In monitrc - Monit agents always send plain text password
+# cmonit will hash it and compare with the stored bcrypt hash
+set mmonit http://monit:your-collector-password@192.168.1.100:8080/collector
+```
+
+**Examples:**
+```bash
+# Default credentials (plain text)
 set mmonit http://monit:monit@192.168.1.100:8080/collector
 
-# Custom credentials (if cmonit started with -collector-user myuser -collector-password mypass)
+# Custom credentials (plain text - development)
 set mmonit http://myuser:mypass@192.168.1.100:8080/collector
 
-# Local connection
-set mmonit http://monit:monit@localhost:8080/collector
+# With bcrypt on cmonit side (production)
+# Monit agent still sends plain text, cmonit compares against bcrypt hash
+set mmonit http://monit:your-collector-password@192.168.1.100:8080/collector
 ```
 
 Then reload Monit:

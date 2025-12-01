@@ -64,12 +64,16 @@ var globalDB *sql.DB
 var debugEnabled bool
 
 // collectorAuthUsername holds the username for collector HTTP Basic Auth
-// Set from the -user command-line flag, defaults to "monit"
+// Set from the -collector-user command-line flag, defaults to "monit"
 var collectorAuthUsername string
 
 // collectorAuthPassword holds the password for collector HTTP Basic Auth
-// Set from the -password command-line flag, defaults to "monit"
+// Set from the -collector-password command-line flag, defaults to "monit"
 var collectorAuthPassword string
+
+// collectorAuthPasswordFormat holds the password format for collector HTTP Basic Auth
+// Set from the -collector-password-format command-line flag, defaults to "plain"
+var collectorAuthPasswordFormat string
 
 // main is the entry point of the program
 // Go programs always start execution here
@@ -139,6 +143,9 @@ func main() {
 
 	collectorPassword := flag.String("collector-password", "monit",
 		"Collector HTTP Basic Auth password (Monit agents must use this)")
+
+	collectorPasswordFormat := flag.String("collector-password-format", "plain",
+		"Collector password format: 'plain' or 'bcrypt' (default: plain)")
 
 	daemonMode := flag.Bool("daemon", false,
 		"Run in background as a daemon process")
@@ -214,6 +221,7 @@ func main() {
 		*webAddr = config.MergeString(cfg.Network.Listen, *webAddr, "localhost:3000")
 		*collectorUser = config.MergeString(cfg.Collector.User, *collectorUser, "monit")
 		*collectorPassword = config.MergeString(cfg.Collector.Password, *collectorPassword, "monit")
+		*collectorPasswordFormat = config.MergeString(cfg.Collector.PasswordFormat, *collectorPasswordFormat, "plain")
 		*webUser = config.MergeString(cfg.Web.User, *webUser, "")
 		*webPassword = config.MergeString(cfg.Web.Password, *webPassword, "")
 		*webPasswordFormat = config.MergeString(cfg.Web.PasswordFormat, *webPasswordFormat, "plain")
@@ -289,7 +297,10 @@ func main() {
 	debugEnabled = *debugFlag
 	db.SetDebugMode(debugEnabled)
 
-	// Validate web password format
+	// Validate password formats
+	if *collectorPasswordFormat != "plain" && *collectorPasswordFormat != "bcrypt" {
+		log.Fatalf("[FATAL] Invalid -collector-password-format: %s (must be 'plain' or 'bcrypt')", *collectorPasswordFormat)
+	}
 	if *webPasswordFormat != "plain" && *webPasswordFormat != "bcrypt" {
 		log.Fatalf("[FATAL] Invalid -web-password-format: %s (must be 'plain' or 'bcrypt')", *webPasswordFormat)
 	}
@@ -297,6 +308,7 @@ func main() {
 	// Set collector authentication credentials from flags
 	collectorAuthUsername = *collectorUser
 	collectorAuthPassword = *collectorPassword
+	collectorAuthPasswordFormat = *collectorPasswordFormat
 
 	// Setup syslog if requested
 	//
@@ -772,49 +784,57 @@ func handleCollector(w http.ResponseWriter, r *http.Request) {
 	//   - ok: bool - true if Basic Auth was provided, false otherwise
 	username, password, ok := r.BasicAuth()
 
-	// Check if authentication was provided and is correct
-	//
-	// Three conditions must all be true (connected with &&):
-	// 1. ok == true: Basic Auth header was present and valid format
-	// 2. username matches the configured collector username (from -user flag)
-	// 3. password matches the configured collector password (from -password flag)
-	//
-	// The ! operator means "not", so !ok means "Basic Auth was NOT provided"
-	// || means "or", so if ANY condition is true, the whole expression is true
-	//
-	// If auth fails, we need to:
-	// 1. Send WWW-Authenticate header (tells client to send credentials)
-	// 2. Return 401 Unauthorized status
-	if !ok || username != collectorAuthUsername || password != collectorAuthPassword {
-		// Set WWW-Authenticate header
-		// This tells the client:
-		// - "You need to authenticate"
-		// - "Use Basic authentication"
-		// - "The realm is 'cmonit'" (realm is like a protection space identifier)
-		//
-		// When a browser receives 401 + WWW-Authenticate, it shows a login dialog
+	// Check if authentication header was provided
+	if !ok {
 		w.Header().Set("WWW-Authenticate", `Basic realm="cmonit"`)
-
-		// Log the authentication failure for security monitoring
-		// Don't log the password (security best practice)
-		if !ok {
-			log.Printf("[WARN] Authentication missing from %s", r.RemoteAddr)
-		} else {
-			log.Printf("[WARN] Authentication failed for user '%s' from %s", username, r.RemoteAddr)
-		}
-
-		// Send 401 Unauthorized response
-		// http.StatusUnauthorized is the constant for 401
-		// 401 means "You need to authenticate to access this resource"
+		log.Printf("[WARN] Authentication missing from %s", r.RemoteAddr)
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
 
-		// return exits the function early
-		// Nothing after this point will execute for this request
+	// Check username (always plain text comparison)
+	if username != collectorAuthUsername {
+		w.Header().Set("WWW-Authenticate", `Basic realm="cmonit"`)
+		log.Printf("[WARN] Authentication failed for user '%s' from %s", username, r.RemoteAddr)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Check password based on format
+	var passwordMatch bool
+
+	if collectorAuthPasswordFormat == "bcrypt" {
+		// Bcrypt comparison
+		//
+		// bcrypt.CompareHashAndPassword() verifies that the password
+		// matches the stored bcrypt hash.
+		//
+		// This is secure because:
+		// - Each password has a unique salt (prevents rainbow table attacks)
+		// - Bcrypt is intentionally slow (prevents brute force)
+		// - Cost factor can be increased as hardware improves
+		err := bcrypt.CompareHashAndPassword([]byte(collectorAuthPassword), []byte(password))
+		passwordMatch = (err == nil)
+	} else {
+		// Plain text comparison (default)
+		//
+		// Direct string comparison
+		// Less secure but simpler and backward compatible
+		passwordMatch = (password == collectorAuthPassword)
+	}
+
+	if !passwordMatch {
+		// Authentication failed
+		w.Header().Set("WWW-Authenticate", `Basic realm="cmonit"`)
+		log.Printf("[WARN] Authentication failed for user '%s' from %s", username, r.RemoteAddr)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
 	// If we reach here, authentication succeeded!
-	log.Printf("[DEBUG] Authenticated as '%s'", username)
+	if debugEnabled {
+		log.Printf("[DEBUG] Authenticated as '%s' (format: %s)", username, collectorAuthPasswordFormat)
+	}
 
 	// Check if the request body is gzip-compressed
 	//

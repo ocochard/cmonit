@@ -28,6 +28,20 @@ collector_port = "8080"
 user = "monit"
 password = "monit"
 
+# Password format: "plain" or "bcrypt"
+# - "plain": Store password in plain text (simple, less secure)
+# - "bcrypt": Store password as bcrypt hash (recommended for production)
+# Default: "plain"
+#
+# To generate a bcrypt hash:
+#   ./cmonit -hash-password "your-password"
+#
+# Example with bcrypt:
+# user = "monit"
+# password = "$2a$10$JbSZFwjwowrvB0WK2JE7Ge7KmlJL3LItpmsWVavJLv3WeGqu6Zq1a"
+# password_format = "bcrypt"
+password_format = "plain"
+
 # Web UI Configuration
 [web]
 # HTTP Basic Auth for the web dashboard

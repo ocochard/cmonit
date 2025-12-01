@@ -33,6 +33,9 @@ import (
 	"syscall"        // System call interface (for signal constants)
 	"time"           // Time operations and ticker
 
+	// External packages
+	"golang.org/x/crypto/bcrypt" // Bcrypt password hashing
+
 	// Internal packages (our code)
 	// These are relative to the module path (github.com/ocochard/cmonit)
 	"github.com/ocochard/cmonit/internal/config" // Configuration file support
@@ -107,6 +110,12 @@ func main() {
 	webPassword := flag.String("web-password", "",
 		"Web UI HTTP Basic Auth password (empty = no authentication)")
 
+	webPasswordFormat := flag.String("web-password-format", "plain",
+		"Web UI password format: 'plain' or 'bcrypt' (default: plain)")
+
+	hashPassword := flag.String("hash-password", "",
+		"Generate bcrypt hash for given password and exit (utility command)")
+
 	webCert := flag.String("web-cert", "",
 		"Web UI TLS certificate file (empty = HTTP only)")
 
@@ -149,6 +158,41 @@ func main() {
 	//   ./cmonit -collector 9000 -listen :4000  # Custom ports
 	flag.Parse()
 
+	// Handle -hash-password utility command
+	//
+	// This is a convenience command to generate bcrypt hashes for passwords.
+	// Usage: ./cmonit -hash-password "mypassword"
+	//
+	// The generated hash can be used in the configuration file:
+	//   [web]
+	//   password = "$2a$10$..."
+	//   password_format = "bcrypt"
+	if *hashPassword != "" {
+		// Generate bcrypt hash with cost 10 (default, balanced security/performance)
+		//
+		// bcrypt.GenerateFromPassword() creates a hash that includes:
+		// - Algorithm version ($2a$, $2b$, etc.)
+		// - Cost factor (10 = 2^10 iterations)
+		// - Salt (random, included in the hash)
+		// - Hash of password+salt
+		//
+		// Example output: $2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy
+		hash, err := bcrypt.GenerateFromPassword([]byte(*hashPassword), bcrypt.DefaultCost)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error generating bcrypt hash: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Print the hash to stdout
+		fmt.Printf("Bcrypt hash: %s\n\n", string(hash))
+		fmt.Println("Add this to your configuration file:")
+		fmt.Println("[web]")
+		fmt.Println("user = \"admin\"")
+		fmt.Printf("password = \"%s\"\n", string(hash))
+		fmt.Println("password_format = \"bcrypt\"")
+		os.Exit(0)
+	}
+
 	// Load configuration file if specified
 	//
 	// Config file provides defaults, CLI flags override them
@@ -172,6 +216,7 @@ func main() {
 		*collectorPassword = config.MergeString(cfg.Collector.Password, *collectorPassword, "monit")
 		*webUser = config.MergeString(cfg.Web.User, *webUser, "")
 		*webPassword = config.MergeString(cfg.Web.Password, *webPassword, "")
+		*webPasswordFormat = config.MergeString(cfg.Web.PasswordFormat, *webPasswordFormat, "plain")
 		*webCert = config.MergeString(cfg.Web.Cert, *webCert, "")
 		*webKey = config.MergeString(cfg.Web.Key, *webKey, "")
 		*dbPath = config.MergeString(cfg.Storage.Database, *dbPath, "/var/run/cmonit/cmonit.db")
@@ -243,6 +288,11 @@ func main() {
 	// Set global debug mode from flag
 	debugEnabled = *debugFlag
 	db.SetDebugMode(debugEnabled)
+
+	// Validate web password format
+	if *webPasswordFormat != "plain" && *webPasswordFormat != "bcrypt" {
+		log.Fatalf("[FATAL] Invalid -web-password-format: %s (must be 'plain' or 'bcrypt')", *webPasswordFormat)
+	}
 
 	// Set collector authentication credentials from flags
 	collectorAuthUsername = *collectorUser
@@ -526,8 +576,8 @@ func main() {
 
 		// Add HTTP Basic Auth if credentials are provided
 		if *webUser != "" && *webPassword != "" {
-			log.Printf("[INFO] Web UI authentication enabled for user: %s", *webUser)
-			handler = basicAuth(webMux, *webUser, *webPassword)
+			log.Printf("[INFO] Web UI authentication enabled for user: %s (format: %s)", *webUser, *webPasswordFormat)
+			handler = basicAuth(webMux, *webUser, *webPassword, *webPasswordFormat)
 		} else {
 			log.Printf("[WARNING] Web UI authentication disabled - use -web-user and -web-password for production")
 		}
@@ -1100,25 +1150,34 @@ func parseSyslogFacility(facility string) (syslog.Priority, error) {
 // HTTP Basic Auth is a simple authentication scheme built into HTTP.
 // The client must send username:password in the Authorization header.
 //
+// Supports two password formats:
+// - "plain": Direct string comparison (less secure, default for backward compatibility)
+// - "bcrypt": Secure bcrypt hash comparison (recommended for production)
+//
 // Parameters:
 //   - next: The handler to wrap (will only be called if auth succeeds)
 //   - username: Required username
-//   - password: Required password
+//   - password: Required password (plain text or bcrypt hash depending on format)
+//   - format: Password format ("plain" or "bcrypt")
 //
 // Returns:
 //   - http.Handler: Wrapped handler that checks credentials first
 //
 // How it works:
 // 1. Extract credentials from Authorization header
-// 2. Compare with expected username/password
-// 3. If match: call next handler
-// 4. If no match: return 401 Unauthorized
+// 2. Compare username (always plain text comparison)
+// 3. Compare password based on format:
+//    - plain: Direct string comparison
+//    - bcrypt: Hash the incoming password and compare with stored hash
+// 4. If match: call next handler
+// 5. If no match: return 401 Unauthorized
 //
 // Security notes:
-// - Use HTTPS to encrypt credentials in transit
-// - Store passwords securely (consider environment variables)
-// - Use strong passwords in production
-func basicAuth(next http.Handler, username, password string) http.Handler {
+// - ALWAYS use HTTPS to encrypt credentials in transit
+// - Use bcrypt format for production deployments
+// - Use strong passwords (12+ characters, mixed case, numbers, symbols)
+// - Consider using environment variables instead of config files for credentials
+func basicAuth(next http.Handler, username, password, format string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Get credentials from Authorization header
 		//
@@ -1129,15 +1188,50 @@ func basicAuth(next http.Handler, username, password string) http.Handler {
 		//   - ok: true if Authorization header was present and valid format
 		user, pass, ok := r.BasicAuth()
 
-		// Check if credentials match
-		//
-		// Must check three conditions:
-		// 1. Authorization header was present (ok == true)
-		// 2. Username matches
-		// 3. Password matches
-		//
-		// Use == for comparison (case-sensitive)
-		if !ok || user != username || pass != password {
+		// Check if authentication header was provided
+		if !ok {
+			w.Header().Set("WWW-Authenticate", `Basic realm="cmonit"`)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			log.Printf("[WARNING] Authentication missing from %s", r.RemoteAddr)
+			return
+		}
+
+		// Check username (always plain text comparison)
+		if user != username {
+			w.Header().Set("WWW-Authenticate", `Basic realm="cmonit"`)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			log.Printf("[WARNING] Failed authentication attempt from %s (user: %s)", r.RemoteAddr, user)
+			return
+		}
+
+		// Check password based on format
+		var passwordMatch bool
+
+		if format == "bcrypt" {
+			// Bcrypt comparison
+			//
+			// bcrypt.CompareHashAndPassword() does:
+			// 1. Extracts the salt from the stored hash
+			// 2. Hashes the incoming password with that salt
+			// 3. Compares the resulting hash with the stored hash
+			//
+			// Returns nil if match, error if mismatch
+			//
+			// This is secure because:
+			// - Each password has a unique salt (prevents rainbow table attacks)
+			// - Bcrypt is intentionally slow (prevents brute force)
+			// - Cost factor can be increased as hardware improves
+			err := bcrypt.CompareHashAndPassword([]byte(password), []byte(pass))
+			passwordMatch = (err == nil)
+		} else {
+			// Plain text comparison (default)
+			//
+			// Direct string comparison
+			// Less secure but simpler for development/testing
+			passwordMatch = (pass == password)
+		}
+
+		if !passwordMatch {
 			// Authentication failed - return 401 Unauthorized
 			//
 			// WWW-Authenticate header tells the browser to show login dialog
@@ -1149,6 +1243,7 @@ func basicAuth(next http.Handler, username, password string) http.Handler {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 
 			// Log the failed attempt (security audit trail)
+			// Don't log the password for security
 			log.Printf("[WARNING] Failed authentication attempt from %s (user: %s)", r.RemoteAddr, user)
 			return
 		}

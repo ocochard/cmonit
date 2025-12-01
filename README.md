@@ -38,6 +38,7 @@ Open Source central monitoring dashboard for Monit: collect status, graph metric
 
 ### Security & Deployment
 - **HTTP Basic Authentication**: Protect web UI with username/password
+- **Bcrypt password hashing**: Secure password storage (recommended for production)
 - **TLS/HTTPS support**: Encrypted connections with certificate support
 - **Configurable addresses**: IPv4/IPv6, custom ports, specific interface binding
 - **SQLite database**: Reliable storage with WAL mode for concurrency
@@ -203,6 +204,12 @@ See `cmonit.conf.sample` for a fully documented configuration file.
   -web-password string
         Web UI HTTP Basic Auth password (empty = no authentication)
 
+  -web-password-format string
+        Web UI password format: 'plain' or 'bcrypt' (default: plain)
+
+  -hash-password string
+        Generate bcrypt hash for given password and exit (utility command)
+
   -web-cert string
         Web UI TLS certificate file (empty = HTTP only)
 
@@ -289,11 +296,38 @@ Note: Both collector and web UI listen on the same IP address (specified by `-li
 
 Protect your dashboard with HTTP Basic Authentication:
 
+**Option 1: Plain text password (development/testing)**
 ```bash
 ./cmonit -web-user admin -web-password your-secure-password
 ```
 
+**Option 2: Bcrypt hashed password (production - recommended)**
+```bash
+# Generate a bcrypt hash
+./cmonit -hash-password "your-secure-password"
+
+# Output:
+# Bcrypt hash: $2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy
+
+# Use the hash in your configuration file
+./cmonit -config /etc/cmonit.conf
+```
+
+**Configuration file example:**
+```toml
+[web]
+user = "admin"
+password = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"
+password_format = "bcrypt"  # or "plain" for plain text passwords
+```
+
 When enabled, all web requests will require authentication. Failed attempts are logged for security auditing.
+
+**Benefits of bcrypt:**
+- Passwords stored as irreversible hashes
+- Built-in salt prevents rainbow table attacks
+- Configurable cost factor (computational difficulty)
+- Industry-standard password storage method
 
 ### TLS/HTTPS Support
 

@@ -39,6 +39,20 @@ password = "monit"
 user = ""
 password = ""
 
+# Password format: "plain" or "bcrypt"
+# - "plain": Store password in plain text (simple, less secure)
+# - "bcrypt": Store password as bcrypt hash (recommended for production)
+# Default: "plain"
+#
+# To generate a bcrypt hash:
+#   ./cmonit -hash-password "your-password"
+#
+# Example with bcrypt:
+# user = "admin"
+# password = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"
+# password_format = "bcrypt"
+password_format = "plain"
+
 # TLS/HTTPS configuration
 # Leave empty to use HTTP (not recommended for production)
 # Default: empty (HTTP only)

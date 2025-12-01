@@ -67,8 +67,14 @@ type WebConfig struct {
 	User string `toml:"user"`
 
 	// Password is the HTTP Basic Auth password for web UI
+	// Can be either plain text or bcrypt hash depending on PasswordFormat
 	// Empty string disables authentication
 	Password string `toml:"password"`
+
+	// PasswordFormat specifies the format of the Password field
+	// Valid values: "plain" (default) or "bcrypt"
+	// When "bcrypt", Password should be a bcrypt hash (e.g., from htpasswd or cmonit -hash-password)
+	PasswordFormat string `toml:"password_format"`
 
 	// Cert is the TLS certificate file path for HTTPS
 	// Empty string disables TLS (uses HTTP)

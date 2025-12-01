@@ -35,7 +35,7 @@ All planned phases have been successfully completed:
 ### Technology Stack
 
 **Backend:**
-- **Go 1.21+** - Single binary, excellent concurrency
+- **Go 1.21+** - Single binary with goroutine-based concurrency
 - **SQLite** - Embedded database with WAL mode
 - **Standard library** - `net/http`, `html/template`, `encoding/xml`, `embed`
 - **Embedded templates** - HTML templates compiled into binary (no external files needed)
@@ -145,7 +145,7 @@ cmonit/
 - ✅ Intelligent host health indicators (green/yellow/red based on poll interval)
 - ✅ Host lifecycle management with safe deletion (>1 hour offline)
 - ✅ Remote host monitoring with ICMP/TCP/UDP response times
-- ✅ Comprehensive system metrics display (load, CPU breakdown, memory, swap)
+- ✅ System metrics display (load, CPU breakdown, memory, swap)
 - ✅ Service detail pages for all service types (0-8)
 
 ### M/Monit API Compatibility
@@ -304,7 +304,7 @@ See `internal/web/mmonit_api.go` for implementation details.
 
 cmonit supports two configuration methods:
 
-### 1. Command-Line Flags (Quick/Simple)
+### 1. Command-Line Flags
 
 ```
 -config       Configuration file path (optional, TOML format)

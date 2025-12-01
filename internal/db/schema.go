@@ -722,7 +722,7 @@ func InitDB(dbPath string) (*sql.DB, error) {
 	// - Only writers block other writers
 	//
 	// Default SQLite mode: readers and writers block each other (slow!)
-	// WAL mode: much better for concurrent access (perfect for web servers!)
+	// WAL mode: supports concurrent readers and writers (suitable for web servers)
 	//
 	// Trade-off: Uses two extra files (.db-wal and .db-shm)
 	_, err = db.Exec("PRAGMA journal_mode = WAL;")

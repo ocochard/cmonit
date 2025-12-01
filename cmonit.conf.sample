@@ -29,7 +29,7 @@ user = "monit"
 password = "monit"
 
 # Password format: "plain" or "bcrypt"
-# - "plain": Store password in plain text (simple, less secure)
+# - "plain": Store password in plain text (less secure)
 # - "bcrypt": Store password as bcrypt hash (recommended for production)
 # Default: "plain"
 #
@@ -54,7 +54,7 @@ user = ""
 password = ""
 
 # Password format: "plain" or "bcrypt"
-# - "plain": Store password in plain text (simple, less secure)
+# - "plain": Store password in plain text (less secure)
 # - "bcrypt": Store password as bcrypt hash (recommended for production)
 # Default: "plain"
 #

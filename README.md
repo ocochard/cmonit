@@ -41,7 +41,7 @@ Open Source central monitoring dashboard for Monit: collect status, graph metric
 - **Bcrypt password hashing**: Secure password storage (recommended for production)
 - **TLS/HTTPS support**: Encrypted connections with certificate support
 - **Configurable addresses**: IPv4/IPv6, custom ports, specific interface binding
-- **SQLite database**: Reliable storage with WAL mode for concurrency
+- **SQLite database**: Storage with WAL mode for concurrency
 - **Syslog integration**: Daemon logging for production environments
 
 ## Quick Start
@@ -449,7 +449,7 @@ sudo service cmonit status
 
 **Configuration Methods:**
 
-1. **Config File with Auto-Discovery (Simplest):**
+1. **Config File with Auto-Discovery:**
    ```bash
    # Just enable - auto-discovers config file
    # Searches: /usr/local/etc/cmonit.conf, then /etc/cmonit.conf

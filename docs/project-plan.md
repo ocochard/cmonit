@@ -3,7 +3,7 @@
 
 ## Overview
 
-**cmonit** is an open-source clone of the proprietary M/Monit software that provides centralized monitoring and management of all Monit-enabled hosts via a modern, clean, and mobile-friendly web interface.
+**cmonit** is an open-source clone of the proprietary M/Monit software that provides centralized monitoring and management of all Monit-enabled hosts via a web interface.
 
 For detailed architecture, technology stack, and implementation details, see **[docs/README.md](README.md)** - the main developer reference.
 
@@ -292,7 +292,7 @@ Administrative:
 - ❌ Overkill for single-server deployment
 - ✅ Better for very large deployments (1000+ hosts)
 
-SQLite is perfect for small-to-medium deployments (<100 hosts). If scaling becomes an issue, migration to PostgreSQL can be done later.
+SQLite works for small-to-medium deployments (<100 hosts). If scaling becomes an issue, migration to PostgreSQL can be done later.
 
 ---
 
@@ -360,7 +360,7 @@ See [docs/README.md](README.md) for complete implementation details.
 
 ### Enhanced System Metrics Display (✅ Completed)
 
-**Goal**: Comprehensive system metrics display in service detail pages
+**Goal**: System metrics display in service detail pages
 
 **Implemented Features**:
 - Load average (1min, 5min, 15min) with visual indicators
@@ -396,7 +396,7 @@ All notable changes to this project are documented here. The format is based on 
     - `internal/db/storage.go`: Added StoreRemoteHostMetrics function
     - `templates/service.html`: Added Remote Host Metrics display section (lines 375-455)
 
-- **Comprehensive System Metrics Display**: Service detail page now displays full system metrics for System type services (type=5)
+- **System Metrics Display**: Service detail page now displays full system metrics for System type services (type=5)
   - Load Average: 1-minute, 5-minute, and 15-minute load averages displayed in responsive grid layout
   - CPU Usage Breakdown: Platform-aware display of CPU metrics with color-coded progress bars
     - FreeBSD: User, System, Nice, Hard IRQ

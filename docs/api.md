@@ -350,7 +350,7 @@ WWW-Authenticate: Basic realm="cmonit"
 
 ### Error Response Format
 
-Most errors return a simple HTTP status code. For some endpoints, a JSON error message may be included:
+Most errors return only an HTTP status code. For some endpoints, a JSON error message may be included:
 
 ```json
 {

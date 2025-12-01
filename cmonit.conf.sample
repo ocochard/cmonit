@@ -102,4 +102,4 @@ debug = false
 [process]
 # Run as background daemon
 # Default: false
-daemon = false
+daemon = true

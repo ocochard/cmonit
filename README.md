@@ -1,6 +1,6 @@
 # cmonit - Central Monit Monitor
 
-Open Source central monitoring dashboard for Monit: collect status, graph metrics, and control services across multiple hosts.
+An Open Source central monitoring dashboard for [Monit](https://mmonit.com/download/): collect status, graph metrics, and control services across multiple hosts.
 
 ![cmonit Status](docs/status.png)
 ![cmonit Host](docs/host.png)

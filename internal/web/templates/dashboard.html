@@ -107,7 +107,7 @@
                         <div id="description-display-{{$host.ID}}" class="prose max-w-none">
                             {{if $host.Description}}
                                 <div class="text-gray-700 bg-gray-50 p-4 rounded border border-gray-200">
-                                    {{$host.Description | safeHTML}}
+                                    {{$host.Description | renderMarkdown}}
                                 </div>
                             {{else}}
                                 <div class="text-gray-400 italic">No description set. Click Edit to add one.</div>
@@ -118,7 +118,7 @@
                         <div id="description-edit-{{$host.ID}}" class="hidden">
                             <textarea id="description-textarea-{{$host.ID}}"
                                       class="w-full h-32 p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono text-sm"
-                                      placeholder="Enter HTML description here (supports formatting, links, etc.)">{{$host.Description}}</textarea>
+                                      placeholder="Enter Markdown description here (supports **bold**, *italic*, links, lists, etc.)">{{$host.Description}}</textarea>
                             <div class="mt-2 flex gap-2">
                                 <button onclick="saveDescription('{{$host.ID}}')" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded text-sm font-semibold transition-colors">
                                     Save

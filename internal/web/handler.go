@@ -16,6 +16,9 @@ import (
 	"log"           // Logging
 	"net/http"      // HTTP server
 	"time"          // Time handling
+
+	"github.com/gomarkdown/markdown"      // Markdown parser
+	"github.com/gomarkdown/markdown/html" // HTML renderer
 )
 
 // =============================================================================
@@ -365,8 +368,15 @@ func InitTemplates() error {
 			}
 			return *f
 		},
-		"safeHTML": func(s string) template.HTML {
-			return template.HTML(s)
+		"renderMarkdown": func(s string) template.HTML {
+			// Configure HTML renderer with security options
+			htmlFlags := html.CommonFlags | html.HrefTargetBlank
+			opts := html.RendererOptions{Flags: htmlFlags}
+			renderer := html.NewRenderer(opts)
+
+			// Parse markdown and render to HTML
+			htmlOutput := markdown.ToHTML([]byte(s), nil, renderer)
+			return template.HTML(htmlOutput)
 		},
 	}
 
@@ -462,11 +472,12 @@ func getDashboardData() (*DashboardData, error) {
 	// - cpu_count, total_memory, total_swap: Hardware specs
 	// - system_uptime, boottime: System timing info
 	// - last_seen: Timestamp of last update
+	// - description: User-defined markdown description/notes
 	//
 	// ORDER BY last_seen DESC: Show most recently seen hosts first
 	const hostsQuery = `
 		SELECT id, hostname, version, os_name, os_release, machine,
-		       cpu_count, total_memory, total_swap, system_uptime, boottime, last_seen
+		       cpu_count, total_memory, total_swap, system_uptime, boottime, last_seen, description
 		FROM hosts
 		ORDER BY last_seen DESC
 	`
@@ -517,6 +528,7 @@ func getDashboardData() (*DashboardData, error) {
 			&host.SystemUptime,
 			&host.Boottime,
 			&host.LastSeen,
+			&host.Description,
 		)
 		if err != nil {
 			return nil, err

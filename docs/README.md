@@ -158,8 +158,8 @@ cmonit/
 - ✅ `DELETE /admin/hosts/:id` - Delete stale host and all related data
 
 ### Security & Production
-- ✅ HTTP Basic Authentication for web UI
-- ✅ TLS/HTTPS support with certificate configuration
+- ✅ HTTP Basic Authentication for web UI and collector
+- ✅ TLS/HTTPS support for both Web UI and Collector with shared certificate configuration
 - ✅ Configurable listen addresses (IPv4/IPv6)
 - ✅ Syslog integration for daemon logging
 - ✅ PID file management
@@ -315,8 +315,8 @@ cmonit supports two configuration methods:
 -syslog       Syslog facility (daemon, local0-7, empty for stderr)
 -web-user     HTTP Basic Auth username (empty = disabled)
 -web-password HTTP Basic Auth password
--web-cert     TLS certificate file (empty = HTTP only)
--web-key      TLS key file
+-tls-cert     TLS certificate file for both Web UI and Collector (empty = HTTP only)
+-tls-key      TLS key file for both Web UI and Collector (empty = HTTP only)
 ```
 
 ### 2. Configuration File (Production/Complex)
@@ -390,8 +390,7 @@ cmonit fully supports all Monit service types with dedicated detail pages:
 
 1. **M/Monit API**: Partial implementation - basic status/events/admin queries only
 2. **Multi-user auth**: Only single username/password for web UI
-3. **HTTPS collector**: Collector endpoint is HTTP only (agents use HTTP Basic Auth)
-4. **Push-only**: No active polling of Monit agents (by design)
+3. **Push-only**: No active polling of Monit agents (by design)
 
 ---
 

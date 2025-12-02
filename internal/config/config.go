@@ -82,11 +82,11 @@ type WebConfig struct {
 	// When "bcrypt", Password should be a bcrypt hash (e.g., from htpasswd or cmonit -hash-password)
 	PasswordFormat string `toml:"password_format"`
 
-	// Cert is the TLS certificate file path for HTTPS
+	// Cert is the TLS certificate file path for HTTPS (applies to both Web UI and Collector)
 	// Empty string disables TLS (uses HTTP)
 	Cert string `toml:"cert"`
 
-	// Key is the TLS key file path for HTTPS
+	// Key is the TLS key file path for HTTPS (applies to both Web UI and Collector)
 	// Empty string disables TLS (uses HTTP)
 	Key string `toml:"key"`
 }

@@ -67,10 +67,10 @@ password = ""
 # password_format = "bcrypt"
 password_format = "plain"
 
-# TLS/HTTPS configuration
+# TLS/HTTPS configuration (applies to both Web UI and Collector)
 # Leave empty to use HTTP (not recommended for production)
 # Default: empty (HTTP only)
-# Uncomment and set paths to enable HTTPS:
+# Uncomment and set paths to enable HTTPS for both endpoints:
 # cert = "/etc/cmonit/ssl/cert.pem"
 # key = "/etc/cmonit/ssl/key.pem"
 cert = ""

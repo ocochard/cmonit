@@ -120,11 +120,11 @@ func main() {
 	hashPassword := flag.String("hash-password", "",
 		"Generate bcrypt hash for given password and exit (utility command)")
 
-	webCert := flag.String("web-cert", "",
-		"Web UI TLS certificate file (empty = HTTP only)")
+	tlsCert := flag.String("tls-cert", "",
+		"TLS certificate file for both Web UI and Collector (empty = HTTP only)")
 
-	webKey := flag.String("web-key", "",
-		"Web UI TLS key file (empty = HTTP only)")
+	tlsKey := flag.String("tls-key", "",
+		"TLS key file for both Web UI and Collector (empty = HTTP only)")
 
 	dbPath := flag.String("db", "/var/run/cmonit/cmonit.db",
 		"Database file path")
@@ -225,8 +225,8 @@ func main() {
 		*webUser = config.MergeString(cfg.Web.User, *webUser, "")
 		*webPassword = config.MergeString(cfg.Web.Password, *webPassword, "")
 		*webPasswordFormat = config.MergeString(cfg.Web.PasswordFormat, *webPasswordFormat, "plain")
-		*webCert = config.MergeString(cfg.Web.Cert, *webCert, "")
-		*webKey = config.MergeString(cfg.Web.Key, *webKey, "")
+		*tlsCert = config.MergeString(cfg.Web.Cert, *tlsCert, "")
+		*tlsKey = config.MergeString(cfg.Web.Key, *tlsKey, "")
 		*dbPath = config.MergeString(cfg.Storage.Database, *dbPath, "/var/run/cmonit/cmonit.db")
 		*pidFile = config.MergeString(cfg.Storage.PidFile, *pidFile, "/var/run/cmonit/cmonit.pid")
 		*syslogFacility = config.MergeString(cfg.Logging.Syslog, *syslogFacility, "")
@@ -551,33 +551,45 @@ func main() {
 	// - We need to run multiple things concurrently (collector + web UI)
 	// - We need main() to continue so we can handle shutdown signals
 	go func() {
-		log.Printf("[INFO] Collector listening on %s", *collectorAddr)
+		// Validate TLS configuration
+		tlsEnabled := *tlsCert != "" && *tlsKey != ""
 
-		// http.ListenAndServe() starts an HTTP server
-		//
-		// Parameters:
-		//   - addr: address to listen on
-		//     - ":8080" = all interfaces (0.0.0.0 and ::), port 8080
-		//     - "localhost:8080" = only local connections
-		//     - "192.168.1.10:8080" = specific IPv4 address
-		//     - "[::1]:8080" = IPv6 localhost
-		//     - "[::]:8080" = all IPv6 interfaces
-		//   - handler: if nil, uses the default ServeMux (what we registered with HandleFunc)
-		//
-		// Returns:
-		//   - error: only returns if the server fails to start or crashes
-		//            normally this function blocks forever
-		//
-		// Note: This is a blocking call - it runs forever until an error occurs
-		//
-		// *collectorAddr dereferences the pointer to get the string value from the flag
-		err := http.ListenAndServe(*collectorAddr, nil)
+		// Start the appropriate server (HTTP or HTTPS)
+		if tlsEnabled {
+			log.Printf("[INFO] Collector listening on %s (HTTPS)", *collectorAddr)
+			err := http.ListenAndServeTLS(*collectorAddr, *tlsCert, *tlsKey, nil)
+			if err != nil {
+				log.Fatalf("[FATAL] Collector server failed: %v", err)
+			}
+		} else {
+			log.Printf("[INFO] Collector listening on %s (HTTP)", *collectorAddr)
 
-		// If we reach here, the server crashed or failed to start
-		// log.Fatalf() prints the error and exits the program with code 1
-		// %v is a verb that prints the error message
-		if err != nil {
-			log.Fatalf("[FATAL] Collector server failed: %v", err)
+			// http.ListenAndServe() starts an HTTP server
+			//
+			// Parameters:
+			//   - addr: address to listen on
+			//     - ":8080" = all interfaces (0.0.0.0 and ::), port 8080
+			//     - "localhost:8080" = only local connections
+			//     - "192.168.1.10:8080" = specific IPv4 address
+			//     - "[::1]:8080" = IPv6 localhost
+			//     - "[::]:8080" = all IPv6 interfaces
+			//   - handler: if nil, uses the default ServeMux (what we registered with HandleFunc)
+			//
+			// Returns:
+			//   - error: only returns if the server fails to start or crashes
+			//            normally this function blocks forever
+			//
+			// Note: This is a blocking call - it runs forever until an error occurs
+			//
+			// *collectorAddr dereferences the pointer to get the string value from the flag
+			err := http.ListenAndServe(*collectorAddr, nil)
+
+			// If we reach here, the server crashed or failed to start
+			// log.Fatalf() prints the error and exits the program with code 1
+			// %v is a verb that prints the error message
+			if err != nil {
+				log.Fatalf("[FATAL] Collector server failed: %v", err)
+			}
 		}
 	}()
 
@@ -603,23 +615,23 @@ func main() {
 		}
 
 		// Validate TLS configuration
-		tlsEnabled := *webCert != "" || *webKey != ""
+		tlsEnabled := *tlsCert != "" || *tlsKey != ""
 		if tlsEnabled {
-			if *webCert == "" || *webKey == "" {
-				log.Fatalf("[FATAL] Both -web-cert and -web-key must be provided for TLS")
+			if *tlsCert == "" || *tlsKey == "" {
+				log.Fatalf("[FATAL] Both -tls-cert and -tls-key must be provided for TLS")
 			}
 		}
 
 		// Start the appropriate server (HTTP or HTTPS)
 		if tlsEnabled {
 			log.Printf("[INFO] Web UI listening on %s (HTTPS)", *webAddr)
-			err := http.ListenAndServeTLS(*webAddr, *webCert, *webKey, handler)
+			err := http.ListenAndServeTLS(*webAddr, *tlsCert, *tlsKey, handler)
 			if err != nil {
 				log.Fatalf("[FATAL] Web server failed: %v", err)
 			}
 		} else {
 			log.Printf("[INFO] Web UI listening on %s (HTTP)", *webAddr)
-			log.Printf("[WARNING] TLS disabled - use -web-cert and -web-key for encrypted connections")
+			log.Printf("[WARNING] TLS disabled - use -tls-cert and -tls-key for encrypted connections")
 			err := http.ListenAndServe(*webAddr, handler)
 			if err != nil {
 				log.Fatalf("[FATAL] Web server failed: %v", err)

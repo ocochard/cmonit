@@ -250,6 +250,9 @@ type RemoteHostMetrics struct {
 //go:embed templates/*.html
 var templatesFS embed.FS
 
+//go:embed static/*
+var staticFS embed.FS
+
 // templates holds parsed HTML templates.
 //
 // template.Template represents a parsed HTML template.
@@ -758,4 +761,60 @@ func (s *Service) StatusMessage() string {
 	default:
 		return fmt.Sprintf("Unknown status (%d)", s.Status)
 	}
+}
+
+// =============================================================================
+// STATIC FILE HANDLER
+// =============================================================================
+
+// HandleStatic serves static files (logo, favicon, etc.) from embedded filesystem.
+//
+// Files are embedded in the binary from internal/web/static/ directory.
+// This handler serves files from the /static/ URL path.
+//
+// Example URLs:
+//   - /static/logo.png -> internal/web/static/logo.png
+//   - /static/favicon.ico -> internal/web/static/favicon.ico
+func HandleStatic(w http.ResponseWriter, r *http.Request) {
+	// Extract the file path from URL (e.g., /static/logo.png -> logo.png)
+	filePath := r.URL.Path[len("/static/"):]
+
+	// Prevent directory traversal attacks
+	if filePath == "" || filePath[0] == '.' {
+		http.Error(w, "Not Found", http.StatusNotFound)
+		return
+	}
+
+	// Read file from embedded filesystem
+	data, err := staticFS.ReadFile("static/" + filePath)
+	if err != nil {
+		http.Error(w, "Not Found", http.StatusNotFound)
+		return
+	}
+
+	// Set content type based on file extension
+	contentType := "application/octet-stream"
+	if len(filePath) > 4 {
+		switch filePath[len(filePath)-4:] {
+		case ".png":
+			contentType = "image/png"
+		case ".jpg", "jpeg":
+			contentType = "image/jpeg"
+		case ".svg":
+			contentType = "image/svg+xml"
+		case ".ico":
+			contentType = "image/x-icon"
+		case ".css":
+			contentType = "text/css"
+		case ".js":
+			contentType = "application/javascript"
+		}
+	}
+
+	// Set caching headers (static files don't change often)
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "public, max-age=86400") // Cache for 24 hours
+
+	// Serve the file
+	w.Write(data)
 }

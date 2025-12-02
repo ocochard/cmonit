@@ -513,6 +513,10 @@ func main() {
 	// Allows users to add custom HTML notes for each host
 	webMux.HandleFunc("/api/host/description", web.HandleUpdateDescription)
 
+	// Static files (logo, favicon, etc.)
+	// Serves embedded static assets from internal/web/static/
+	webMux.HandleFunc("/static/", web.HandleStatic)
+
 	// M/Monit-compatible API endpoints
 	//
 	// These endpoints provide M/Monit HTTP API compatibility

@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>cmonit - Status Overview</title>
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         .status-icon {
@@ -42,7 +43,10 @@
     <div class="container mx-auto px-4 py-8 max-w-7xl">
         <!-- Header -->
         <div class="mb-8">
-            <h1 class="text-3xl font-bold text-gray-900 mb-2">cmonit - Status Overview</h1>
+            <div class="flex items-center mb-4">
+                <img src="/static/logo.png" alt="cmonit Logo" class="h-12 mr-4">
+                <h1 class="text-3xl font-bold text-gray-900">cmonit - Status Overview</h1>
+            </div>
             <p class="text-gray-600">Last updated: {{.LastUpdate.Format "Jan 02, 2006 15:04:05 MST"}}</p>
         </div>
 

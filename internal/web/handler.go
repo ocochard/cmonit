@@ -32,6 +32,7 @@ import (
 type DashboardData struct {
 	Hosts      []HostWithServices // List of all monitored hosts
 	LastUpdate time.Time          // When this data was retrieved
+	AppVersion string             // Application version (e.g., "1.0.0")
 }
 
 // HostWithServices represents a host and all its services.
@@ -82,6 +83,7 @@ type Service struct {
 type StatusData struct {
 	Hosts      []HostStatus // List of all hosts with aggregated status
 	LastUpdate time.Time    // When this data was retrieved
+	AppVersion string       // Application version (e.g., "1.0.0")
 }
 
 // HostStatus represents a host's overall status for the status page.
@@ -106,6 +108,7 @@ type EventsData struct {
 	Hostname   string    // Host display name
 	Events     []Event   // List of events
 	LastUpdate time.Time // When this data was retrieved
+	AppVersion string    // Application version (e.g., "1.0.0")
 }
 
 // Event represents a single event from the events table.
@@ -131,6 +134,7 @@ type ServiceDetailData struct {
 	NetworkData     *NetworkMetrics     // Network metrics (if type 8)
 	RemoteHostData  *RemoteHostMetrics  // Remote host metrics (if type 3 or 4)
 	LastUpdate      time.Time           // When this data was retrieved
+	AppVersion      string              // Application version (e.g., "1.0.0")
 }
 
 // FilesystemMetrics holds filesystem service metrics.
@@ -267,9 +271,25 @@ var templates *template.Template
 // Set this using SetDB() before starting the web server.
 var db *sql.DB
 
+// appVersion holds the application version string.
+//
+// Set this using SetVersion() before starting the web server.
+var appVersion = "dev"
+
 // =============================================================================
 // INITIALIZATION
 // =============================================================================
+
+// SetVersion sets the application version for display in templates.
+//
+// This should be called at startup with the version string from main.
+//
+// Example:
+//
+//	web.SetVersion("1.0.0")
+func SetVersion(v string) {
+	appVersion = v
+}
 
 // SetDB sets the database connection for web handlers.
 //
@@ -566,6 +586,7 @@ func getDashboardData() (*DashboardData, error) {
 	return &DashboardData{
 		Hosts:      hosts,
 		LastUpdate: time.Now(),
+		AppVersion: appVersion,
 	}, nil
 }
 

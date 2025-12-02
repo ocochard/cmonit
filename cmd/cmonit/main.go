@@ -63,6 +63,14 @@ var globalDB *sql.DB
 // Controlled by the -debug command-line flag.
 var debugEnabled bool
 
+// version is the application version number.
+//
+// This variable is set at build time using -ldflags:
+//   go build -ldflags "-X main.version=1.0.0" -o cmonit ./cmd/cmonit
+//
+// If not set during build, defaults to "dev" (development build).
+var version = "dev"
+
 // collectorAuthUsername holds the username for collector HTTP Basic Auth
 // Set from the -collector-user command-line flag, defaults to "monit"
 var collectorAuthUsername string
@@ -446,6 +454,9 @@ func main() {
 	// The web handlers need to query the database to show host/service status
 	// web.SetDB() stores the database connection for use by web handlers
 	web.SetDB(database)
+
+	// Set the application version for display in templates
+	web.SetVersion(version)
 
 	// Set up HTTP routes (URL patterns and their handler functions)
 	//

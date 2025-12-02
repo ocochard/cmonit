@@ -157,6 +157,7 @@ func getStatusData() (*StatusData, error) {
 	return &StatusData{
 		Hosts:      hosts,
 		LastUpdate: time.Now(),
+		AppVersion: appVersion,
 	}, nil
 }
 
@@ -233,6 +234,7 @@ func getHostDetailData(hostID string) (*DashboardData, error) {
 	return &DashboardData{
 		Hosts:      []HostWithServices{host},
 		LastUpdate: time.Now(),
+		AppVersion: appVersion,
 	}, nil
 }
 
@@ -290,6 +292,7 @@ func getEventsData(hostID string) (*EventsData, error) {
 		Hostname:   hostname,
 		Events:     events,
 		LastUpdate: time.Now(),
+		AppVersion: appVersion,
 	}, nil
 }
 
@@ -580,6 +583,7 @@ func getServiceDetailData(hostID, serviceName string) (*ServiceDetailData, error
 		Hostname:   hostname,
 		Service:    svc,
 		LastUpdate: time.Now(),
+		AppVersion: appVersion,
 	}
 
 	// Get filesystem metrics if this is a filesystem service (type 0)

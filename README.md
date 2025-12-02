@@ -49,12 +49,23 @@ An Open Source central monitoring dashboard for [Monit](https://mmonit.com/downl
 ### Build
 
 ```bash
-# Build - templates are automatically embedded in the binary
+# Build with version number (recommended)
+go build -ldflags "-X main.version=1.0" -o cmonit ./cmd/cmonit
+
+# Build without version (shows "dev" as version)
 go build -o cmonit ./cmd/cmonit
 
 # The resulting binary is self-contained and ready to deploy
-# No external files (templates, assets) are needed
+# - Templates are automatically embedded in the binary
+# - No external files (templates, assets) are needed
+# - Version is displayed in the web UI footer
 ```
+
+**Version Management:**
+- Use `-ldflags "-X main.version=X.Y.Z"` to set the version at build time
+- Version is displayed in all page footers (next to GitHub link)
+- Follows standard Go convention for version injection
+- Examples: `1.0`, `1.0.0`, `2.1.3`, `1.0.0-beta`
 
 ### Run
 

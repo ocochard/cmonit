@@ -365,6 +365,9 @@ func InitTemplates() error {
 			}
 			return *f
 		},
+		"safeHTML": func(s string) template.HTML {
+			return template.HTML(s)
+		},
 	}
 
 	// Parse all .html files in templates/ directory with custom functions

@@ -117,7 +117,8 @@ func StoreHost(db *sql.DB, server *parser.Server, platform *parser.Platform, sys
 			monit_uptime,
 			poll_interval,
 			last_seen,
-			created_at
+			created_at,
+			description
 		) VALUES (
 			?,
 			?,
@@ -143,6 +144,10 @@ func StoreHost(db *sql.DB, server *parser.Server, platform *parser.Platform, sys
 			COALESCE(
 				(SELECT created_at FROM hosts WHERE id = ?),
 				?
+			),
+			COALESCE(
+				(SELECT description FROM hosts WHERE id = ?),
+				''
 			)
 		)
 	`
@@ -206,8 +211,9 @@ func StoreHost(db *sql.DB, server *parser.Server, platform *parser.Platform, sys
 		server.Uptime,
 		server.Poll,
 		now,
-		hostID,
-		now,
+		hostID,   // For created_at COALESCE subquery
+		now,      // Default value for created_at
+		hostID,   // For description COALESCE subquery
 	)
 
 	// Check if the query failed

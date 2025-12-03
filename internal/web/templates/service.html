@@ -597,7 +597,7 @@
                     <div class="mb-6">
                         <h4 class="font-semibold mb-3">Memory Usage</h4>
                         <div class="bg-gray-200 rounded-full h-6 overflow-hidden mb-2">
-                            {{if .SystemData.MemoryPercent}}
+                            {{if ge .SystemData.MemoryPercent 0.0}}
                             <div class="{{if lt .SystemData.MemoryPercent 80.0}}bg-green-500{{else if lt .SystemData.MemoryPercent 90.0}}bg-yellow-500{{else}}bg-red-500{{end}} h-full flex items-center justify-center text-white text-sm font-semibold" style="width: {{.SystemData.MemoryPercent}}%">
                                 {{printf "%.1f%%" .SystemData.MemoryPercent}}
                             </div>
@@ -611,13 +611,13 @@
                             <div class="bg-gray-50 p-3 rounded">
                                 <span class="text-gray-500 block mb-1">Used</span>
                                 <span class="font-semibold text-lg">
-                                    {{if .SystemData.MemoryKB}}
-                                        {{if ge .SystemData.MemoryKB 1073741824}}
-                                            {{printf "%.2f GB" (divf .SystemData.MemoryKB 1073741824)}}
-                                        {{else if ge .SystemData.MemoryKB 1048576}}
-                                            {{printf "%.2f MB" (divf .SystemData.MemoryKB 1048576)}}
+                                    {{if ge .SystemData.MemoryKB 0}}
+                                        {{if ge .SystemData.MemoryKB 1048576}}
+                                            {{printf "%.2f GB" (divf .SystemData.MemoryKB 1048576)}}
+                                        {{else if ge .SystemData.MemoryKB 1024}}
+                                            {{printf "%.2f MB" (divf .SystemData.MemoryKB 1024)}}
                                         {{else}}
-                                            {{printf "%.2f KB" .SystemData.MemoryKB}}
+                                            {{printf "%.2f KB" (divf .SystemData.MemoryKB 1)}}
                                         {{end}}
                                     {{else}}
                                         N/A
@@ -627,7 +627,7 @@
                             <div class="bg-gray-50 p-3 rounded">
                                 <span class="text-gray-500 block mb-1">Percentage</span>
                                 <span class="font-semibold text-lg">
-                                    {{if .SystemData.MemoryPercent}}{{printf "%.1f%%" .SystemData.MemoryPercent}}{{else}}N/A{{end}}
+                                    {{if ge .SystemData.MemoryPercent 0.0}}{{printf "%.1f%%" .SystemData.MemoryPercent}}{{else}}N/A{{end}}
                                 </span>
                             </div>
                         </div>
@@ -637,7 +637,7 @@
                     <div>
                         <h4 class="font-semibold mb-3">Swap Usage</h4>
                         <div class="bg-gray-200 rounded-full h-6 overflow-hidden mb-2">
-                            {{if .SystemData.SwapPercent}}
+                            {{if ge .SystemData.SwapPercent 0.0}}
                             <div class="{{if lt .SystemData.SwapPercent 50.0}}bg-green-500{{else if lt .SystemData.SwapPercent 80.0}}bg-yellow-500{{else}}bg-red-500{{end}} h-full flex items-center justify-center text-white text-sm font-semibold" style="width: {{.SystemData.SwapPercent}}%">
                                 {{printf "%.1f%%" .SystemData.SwapPercent}}
                             </div>
@@ -651,13 +651,13 @@
                             <div class="bg-gray-50 p-3 rounded">
                                 <span class="text-gray-500 block mb-1">Used</span>
                                 <span class="font-semibold text-lg">
-                                    {{if .SystemData.SwapKB}}
-                                        {{if ge .SystemData.SwapKB 1073741824}}
-                                            {{printf "%.2f GB" (divf .SystemData.SwapKB 1073741824)}}
-                                        {{else if ge .SystemData.SwapKB 1048576}}
-                                            {{printf "%.2f MB" (divf .SystemData.SwapKB 1048576)}}
+                                    {{if ge .SystemData.SwapKB 0}}
+                                        {{if ge .SystemData.SwapKB 1048576}}
+                                            {{printf "%.2f GB" (divf .SystemData.SwapKB 1048576)}}
+                                        {{else if ge .SystemData.SwapKB 1024}}
+                                            {{printf "%.2f MB" (divf .SystemData.SwapKB 1024)}}
                                         {{else}}
-                                            {{printf "%.2f KB" .SystemData.SwapKB}}
+                                            {{printf "%.2f KB" (divf .SystemData.SwapKB 1)}}
                                         {{end}}
                                     {{else}}
                                         N/A
@@ -667,7 +667,7 @@
                             <div class="bg-gray-50 p-3 rounded">
                                 <span class="text-gray-500 block mb-1">Percentage</span>
                                 <span class="font-semibold text-lg">
-                                    {{if .SystemData.SwapPercent}}{{printf "%.1f%%" .SystemData.SwapPercent}}{{else}}N/A{{end}}
+                                    {{if ge .SystemData.SwapPercent 0.0}}{{printf "%.1f%%" .SystemData.SwapPercent}}{{else}}N/A{{end}}
                                 </span>
                             </div>
                         </div>

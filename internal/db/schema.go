@@ -39,7 +39,7 @@ import (
 
 // currentSchemaVersion is the current database schema version.
 // Increment this when making schema changes that require migration.
-const currentSchemaVersion = 10
+const currentSchemaVersion = 11
 
 // SQL schema for the cmonit database
 //
@@ -584,6 +584,55 @@ const (
 	createHostAvailabilityIndex = `
 	CREATE INDEX IF NOT EXISTS idx_host_availability_lookup
 		ON host_availability(host_id, timestamp);`
+
+	// createHostGroupsTable creates the hostgroups table
+	//
+	// This table stores unique hostgroup names.
+	// Monit allows hosts to belong to one or more groups via the "set group" directive.
+	//
+	// Columns:
+	//   - id: Auto-incrementing integer
+	//   - name: Unique group name (e.g., "Workstation", "FreeBSD", "Production")
+	//   - created_at: When this group was first seen
+	//
+	// Example groups: "Production", "Development", "Web Servers", "Database Servers"
+	createHostGroupsTable = `
+	CREATE TABLE IF NOT EXISTS hostgroups (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL UNIQUE,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);`
+
+	// createHostHostGroupsTable creates the host_hostgroups junction table
+	//
+	// This is a many-to-many relationship table between hosts and hostgroups.
+	// A host can belong to multiple groups, and a group can contain multiple hosts.
+	//
+	// Columns:
+	//   - host_id: Foreign key to hosts table
+	//   - hostgroup_id: Foreign key to hostgroups table
+	//
+	// The UNIQUE constraint prevents duplicate associations.
+	// CASCADE DELETE ensures that when a host is deleted, its group associations are also deleted.
+	createHostHostGroupsTable = `
+	CREATE TABLE IF NOT EXISTS host_hostgroups (
+		host_id TEXT NOT NULL,
+		hostgroup_id INTEGER NOT NULL,
+		FOREIGN KEY (host_id) REFERENCES hosts(id) ON DELETE CASCADE,
+		FOREIGN KEY (hostgroup_id) REFERENCES hostgroups(id) ON DELETE CASCADE,
+		UNIQUE(host_id, hostgroup_id)
+	);`
+
+	// createHostHostGroupsIndex creates index for fast hostgroup lookups
+	//
+	// Optimizes queries like:
+	// "Show me all hosts in the Production group"
+	// "Show me all groups for host123"
+	createHostHostGroupsIndex = `
+	CREATE INDEX IF NOT EXISTS idx_host_hostgroups_host
+		ON host_hostgroups(host_id);
+	CREATE INDEX IF NOT EXISTS idx_host_hostgroups_group
+		ON host_hostgroups(hostgroup_id);`
 )
 
 // InitDB initializes the database and creates all tables.
@@ -866,6 +915,27 @@ func InitDB(dbPath string) (*sql.DB, error) {
 	if err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to create host_availability index: %w", err)
+	}
+
+	// Create hostgroups table
+	_, err = db.Exec(createHostGroupsTable)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to create hostgroups table: %w", err)
+	}
+
+	// Create host_hostgroups junction table
+	_, err = db.Exec(createHostHostGroupsTable)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to create host_hostgroups table: %w", err)
+	}
+
+	// Create host_hostgroups indexes
+	_, err = db.Exec(createHostHostGroupsIndex)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to create host_hostgroups indexes: %w", err)
 	}
 
 	log.Printf("[INFO] Database schema created successfully")
@@ -1161,6 +1231,36 @@ func migrateSchema(db *sql.DB, fromVersion, toVersion int) error {
 				return err
 			}
 			log.Printf("[INFO] Successfully migrated to schema version 10")
+
+		case 10:
+			// Migration from version 10 to version 11
+			// Add hostgroups and host_hostgroups tables for host group support
+			log.Printf("[INFO] Migrating from v10 to v11: Adding hostgroups tables")
+
+			// Create hostgroups table
+			_, err := db.Exec(createHostGroupsTable)
+			if err != nil {
+				return fmt.Errorf("migration v10->v11 failed creating hostgroups table: %w", err)
+			}
+
+			// Create host_hostgroups junction table
+			_, err = db.Exec(createHostHostGroupsTable)
+			if err != nil {
+				return fmt.Errorf("migration v10->v11 failed creating host_hostgroups table: %w", err)
+			}
+
+			// Create indexes
+			_, err = db.Exec(createHostHostGroupsIndex)
+			if err != nil {
+				return fmt.Errorf("migration v10->v11 failed creating indexes: %w", err)
+			}
+
+			fromVersion = 11
+			err = setSchemaVersion(db, fromVersion)
+			if err != nil {
+				return err
+			}
+			log.Printf("[INFO] Successfully migrated to schema version 11")
 
 		default:
 			return fmt.Errorf("no migration path from version %d", fromVersion)

@@ -867,6 +867,64 @@ func StoreProcessMetrics(db *sql.DB, hostID string, service *parser.Service) err
 //
 // Returns:
 //   - error: nil if everything stored successfully, error if any part failed
+// StoreHostGroups stores the hostgroups for a given host.
+//
+// This function:
+// 1. Ensures all group names exist in the hostgroups table
+// 2. Clears existing group associations for the host
+// 3. Creates new associations between the host and its groups
+//
+// Parameters:
+//   - db: Database connection
+//   - hostID: The host ID
+//   - groupNames: Slice of group names from Monit XML
+//
+// Returns:
+//   - error: nil if successful, error if failed
+func StoreHostGroups(db *sql.DB, hostID string, groupNames []string) error {
+	if len(groupNames) == 0 {
+		// No groups to store, but we should clear any existing associations
+		_, err := db.Exec("DELETE FROM host_hostgroups WHERE host_id = ?", hostID)
+		if err != nil {
+			return fmt.Errorf("failed to clear host groups: %w", err)
+		}
+		return nil
+	}
+
+	// Step 1: Ensure all group names exist in hostgroups table
+	// Use INSERT OR IGNORE to add groups if they don't exist
+	for _, groupName := range groupNames {
+		_, err := db.Exec("INSERT OR IGNORE INTO hostgroups (name) VALUES (?)", groupName)
+		if err != nil {
+			return fmt.Errorf("failed to insert hostgroup %s: %w", groupName, err)
+		}
+	}
+
+	// Step 2: Clear existing associations for this host
+	_, err := db.Exec("DELETE FROM host_hostgroups WHERE host_id = ?", hostID)
+	if err != nil {
+		return fmt.Errorf("failed to clear existing host groups: %w", err)
+	}
+
+	// Step 3: Create new associations
+	for _, groupName := range groupNames {
+		// Get the group ID
+		var groupID int
+		err := db.QueryRow("SELECT id FROM hostgroups WHERE name = ?", groupName).Scan(&groupID)
+		if err != nil {
+			return fmt.Errorf("failed to get hostgroup ID for %s: %w", groupName, err)
+		}
+
+		// Insert the association
+		_, err = db.Exec("INSERT INTO host_hostgroups (host_id, hostgroup_id) VALUES (?, ?)", hostID, groupID)
+		if err != nil {
+			return fmt.Errorf("failed to associate host with group %s: %w", groupName, err)
+		}
+	}
+
+	return nil
+}
+
 func StoreMonitStatus(db *sql.DB, status *parser.MonitStatus) error {
 	// Generate host ID (same logic as in StoreHost)
 	//
@@ -896,6 +954,16 @@ func StoreMonitStatus(db *sql.DB, status *parser.MonitStatus) error {
 	if err != nil {
 		// If we can't store the host, don't bother with services/metrics
 		return fmt.Errorf("failed to store host: %w", err)
+	}
+
+	// Step 2.5: Store host groups
+	//
+	// Update the hostgroups and host_hostgroups tables with the groups
+	// this host belongs to (from <hostgroups><name>...</name></hostgroups>)
+	err = StoreHostGroups(db, hostID, status.HostGroups)
+	if err != nil {
+		// Log warning but don't fail the entire operation
+		log.Printf("[WARN] Failed to store host groups for %s: %v", hostID, err)
 	}
 
 	// Step 3: Store all services

@@ -891,3 +891,90 @@ func HandleUpdateDescription(w http.ResponseWriter, r *http.Request) {
 		Message: "Description updated successfully",
 	}, http.StatusOK)
 }
+
+// =============================================================================
+// HOST GROUPS API
+// =============================================================================
+
+// HostGroup represents a host group with its member hosts.
+type HostGroup struct {
+	ID        int      `json:"id"`
+	Name      string   `json:"name"`
+	HostCount int      `json:"host_count"`
+	Hostnames []string `json:"hostnames,omitempty"`
+}
+
+// HostGroupsResponse is the JSON response for hostgroups API.
+type HostGroupsResponse struct {
+	Groups []HostGroup `json:"groups"`
+}
+
+// HandleHostGroupsAPI returns a list of all host groups and their member hosts.
+//
+// GET /api/hostgroups
+//
+// Returns JSON with all hostgroups and optionally their member hosts.
+func HandleHostGroupsAPI(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Query all hostgroups with their host counts
+	const query = `
+		SELECT
+			hg.id,
+			hg.name,
+			COUNT(hhg.host_id) as host_count
+		FROM hostgroups hg
+		LEFT JOIN host_hostgroups hhg ON hg.id = hhg.hostgroup_id
+		GROUP BY hg.id, hg.name
+		ORDER BY hg.name ASC
+	`
+
+	rows, err := db.Query(query)
+	if err != nil {
+		log.Printf("[ERROR] Failed to query hostgroups: %v", err)
+		respondJSON(w, map[string]string{"error": "Failed to query hostgroups"}, http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var groups []HostGroup
+	for rows.Next() {
+		var group HostGroup
+		err := rows.Scan(&group.ID, &group.Name, &group.HostCount)
+		if err != nil {
+			log.Printf("[ERROR] Failed to scan hostgroup row: %v", err)
+			continue
+		}
+
+		// Query hostnames for this group
+		hostnameQuery := `
+			SELECT h.hostname
+			FROM hosts h
+			INNER JOIN host_hostgroups hhg ON h.id = hhg.host_id
+			WHERE hhg.hostgroup_id = ?
+			ORDER BY h.hostname ASC
+		`
+		hostnameRows, err := db.Query(hostnameQuery, group.ID)
+		if err != nil {
+			log.Printf("[ERROR] Failed to query hostnames for group %s: %v", group.Name, err)
+			continue
+		}
+
+		var hostnames []string
+		for hostnameRows.Next() {
+			var hostname string
+			if err := hostnameRows.Scan(&hostname); err == nil {
+				hostnames = append(hostnames, hostname)
+			}
+		}
+		hostnameRows.Close()
+
+		group.Hostnames = hostnames
+		groups = append(groups, group)
+	}
+
+	respondJSON(w, HostGroupsResponse{Groups: groups}, http.StatusOK)
+}

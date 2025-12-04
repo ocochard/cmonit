@@ -61,6 +61,11 @@ type MonitStatus struct {
 	//
 	// Monit sends <service> elements directly under <monit>, no wrapper element
 	Services []Service `xml:"service"`
+
+	// HostGroups contains the list of groups this host belongs to
+	// Multiple <name> elements under <hostgroups>
+	// Example: <hostgroups><name>Workstation</name><name>FreeBSD</name></hostgroups>
+	HostGroups []string `xml:"hostgroups>name"`
 }
 
 // Server represents information about the Monit agent/daemon.
@@ -1051,14 +1056,16 @@ type MonitStatusXML struct {
 	ServicesWrapper struct {
 		Services []ServiceXML `xml:"service"`
 	} `xml:"services"`  // Monit sends services wrapped in <services> element
+	HostGroups  []string     `xml:"hostgroups>name"` // Host groups: <hostgroups><name>...</name></hostgroups>
 }
 
 // ToMonitStatus converts MonitStatusXML to the domain MonitStatus struct.
 func (msx *MonitStatusXML) ToMonitStatus() *MonitStatus {
 	ms := &MonitStatus{
-		Server:   msx.Server,
-		Platform: msx.Platform,
-		Services: make([]Service, len(msx.ServicesWrapper.Services)),
+		Server:     msx.Server,
+		Platform:   msx.Platform,
+		Services:   make([]Service, len(msx.ServicesWrapper.Services)),
+		HostGroups: msx.HostGroups,
 	}
 
 	for i, svcXML := range msx.ServicesWrapper.Services {

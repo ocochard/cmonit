@@ -730,7 +730,7 @@
 
             if (response.ok) {
                 alert(`Host "${deleteHostname}" deleted successfully`);
-                window.location.reload();
+                window.location.href = '/';
             } else {
                 const errorText = await response.text();
                 alert(`Failed to delete host: ${errorText}`);

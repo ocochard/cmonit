@@ -854,6 +854,20 @@ func InitDB(dbPath string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to create remote_host_metrics index: %w", err)
 	}
 
+	// Create host_availability table
+	_, err = db.Exec(createHostAvailabilityTable)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to create host_availability table: %w", err)
+	}
+
+	// Create host_availability index
+	_, err = db.Exec(createHostAvailabilityIndex)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to create host_availability index: %w", err)
+	}
+
 	log.Printf("[INFO] Database schema created successfully")
 
 	// Return the database connection

@@ -84,6 +84,7 @@ type StatusData struct {
 	Hosts      []HostStatus // List of all hosts with aggregated status
 	LastUpdate time.Time    // When this data was retrieved
 	AppVersion string       // Application version (e.g., "1.0.0")
+	Groups     []string     // List of all unique hostgroups for filtering
 }
 
 // HostStatus represents a host's overall status for the status page.
@@ -100,6 +101,7 @@ type HostStatus struct {
 	EventCount        int       // Number of events for this host
 	TotalServices     int       // Total number of services
 	FailedServices    int       // Number of failed/warning services
+	Groups            []string  // Hostgroups this host belongs to
 }
 
 // EventsData holds data for the events page.

@@ -147,6 +147,13 @@ func getStatusData() (*StatusData, error) {
 			hostStatus.EventCount = 0
 		}
 
+		// Get hostgroups for this host
+		hostStatus.Groups, err = getHostGroups(hostStatus.ID)
+		if err != nil {
+			log.Printf("[ERROR] Failed to get hostgroups for host %s: %v", hostStatus.ID, err)
+			hostStatus.Groups = []string{}
+		}
+
 		hosts = append(hosts, hostStatus)
 	}
 
@@ -154,10 +161,18 @@ func getStatusData() (*StatusData, error) {
 		return nil, err
 	}
 
+	// Get all unique hostgroup names for the filter dropdown
+	allGroups, err := getAllHostGroups()
+	if err != nil {
+		log.Printf("[ERROR] Failed to get all hostgroups: %v", err)
+		allGroups = []string{}
+	}
+
 	return &StatusData{
 		Hosts:      hosts,
 		LastUpdate: time.Now(),
 		AppVersion: appVersion,
+		Groups:     allGroups,
 	}, nil
 }
 
@@ -1174,4 +1189,58 @@ func getAvailabilityData(hostID string, hours int) (*AvailabilityResponse, error
 		Hostname:   hostname,
 		Datapoints: datapoints,
 	}, nil
+}
+
+// getHostGroups returns the list of hostgroup names for a given host.
+func getHostGroups(hostID string) ([]string, error) {
+	const query = `
+		SELECT hg.name
+		FROM hostgroups hg
+		INNER JOIN host_hostgroups hhg ON hg.id = hhg.hostgroup_id
+		WHERE hhg.host_id = ?
+		ORDER BY hg.name ASC
+	`
+
+	rows, err := db.Query(query, hostID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var groups []string
+	for rows.Next() {
+		var groupName string
+		if err := rows.Scan(&groupName); err != nil {
+			return nil, err
+		}
+		groups = append(groups, groupName)
+	}
+
+	return groups, rows.Err()
+}
+
+// getAllHostGroups returns all unique hostgroup names for the filter dropdown.
+func getAllHostGroups() ([]string, error) {
+	const query = `
+		SELECT name
+		FROM hostgroups
+		ORDER BY name ASC
+	`
+
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var groups []string
+	for rows.Next() {
+		var groupName string
+		if err := rows.Scan(&groupName); err != nil {
+			return nil, err
+		}
+		groups = append(groups, groupName)
+	}
+
+	return groups, rows.Err()
 }

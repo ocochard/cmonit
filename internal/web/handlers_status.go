@@ -1084,8 +1084,8 @@ func HandleAvailabilityAPI(w http.ResponseWriter, r *http.Request) {
 	if hoursStr != "" {
 		var err error
 		_, err = fmt.Sscanf(hoursStr, "%d", &hours)
-		if err != nil || hours < 1 || hours > 168 { // Max 1 week
-			http.Error(w, "Invalid hours parameter (must be 1-168)", http.StatusBadRequest)
+		if err != nil || hours < 1 || hours > 8760 { // Max 1 year (365 days)
+			http.Error(w, "Invalid hours parameter (must be 1-8760)", http.StatusBadRequest)
 			return
 		}
 	}

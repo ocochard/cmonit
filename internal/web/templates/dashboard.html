@@ -138,8 +138,10 @@
                             <div class="flex gap-2">
                                 <button onclick="changeAvailabilityRange('{{$host.ID}}', '1')" class="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-sm avail-btn" data-hours="1">1h</button>
                                 <button onclick="changeAvailabilityRange('{{$host.ID}}', '6')" class="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-sm avail-btn" data-hours="6">6h</button>
-                                <button onclick="changeAvailabilityRange('{{$host.ID}}', '24')" class="px-3 py-1 bg-blue-600 text-white rounded text-sm avail-btn active" data-hours="24">24h</button>
+                                <button onclick="changeAvailabilityRange('{{$host.ID}}', '24')" class="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-sm avail-btn" data-hours="24">24h</button>
                                 <button onclick="changeAvailabilityRange('{{$host.ID}}', '168')" class="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-sm avail-btn" data-hours="168">7d</button>
+                                <button onclick="changeAvailabilityRange('{{$host.ID}}', '720')" class="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-sm avail-btn" data-hours="720">30d</button>
+                                <button onclick="changeAvailabilityRange('{{$host.ID}}', '8760')" class="px-3 py-1 bg-blue-600 text-white rounded text-sm avail-btn active" data-hours="8760">1y</button>
                             </div>
                         </div>
                         <div class="bg-gray-50 p-4 rounded">
@@ -295,10 +297,10 @@
                 // Load availability data after DOM is ready
                 if (document.readyState === 'loading') {
                     document.addEventListener('DOMContentLoaded', function() {
-                        loadAvailability('{{$host.ID}}', '24');
+                        loadAvailability('{{$host.ID}}', '8760');
                     });
                 } else {
-                    loadAvailability('{{$host.ID}}', '24');
+                    loadAvailability('{{$host.ID}}', '8760');
                 }
             </script>
 

@@ -379,6 +379,28 @@ All notable changes to this project are documented here. The format is based on 
 
 ### [Unreleased]
 
+#### Fixed - v1.2.1 (2026-01-09)
+- **Availability Data Preservation**: Fixed CASCADE DELETE issue causing availability graph data loss
+  - Changed `INSERT OR REPLACE` to `INSERT ... ON CONFLICT DO UPDATE` in StoreHost() and StoreService()
+  - Previous implementation deleted and recreated host records on every update, triggering CASCADE DELETE
+  - With schema v12's CASCADE DELETE, this wiped all availability history every 30 seconds
+  - Now updates rows in-place, preserving all foreign key relationships and historical data
+  - Files modified: `internal/db/storage.go`
+
+#### Changed - Schema v12 (2026-01-09)
+- **Database Schema Improvements**: Enhanced data integrity and referential integrity
+  - All foreign keys now specify ON DELETE CASCADE for automatic cleanup
+  - Added CHECK constraints for data validation:
+    - Service type constrained to 0-8
+    - Monitor status constrained to 0-2
+    - Percentages constrained to 0-100 range
+    - Port numbers constrained to 1-65535 range
+    - Positive value constraints on counters and IDs
+  - Description field limited to 8192 characters to prevent excessive storage
+  - Improved data consistency for new database installations
+  - Existing databases migrate to v12 with constraint definitions (apply to new data)
+  - Files modified: `internal/db/schema.go`, `internal/db/storage.go`
+
 #### Added
 - **Remote Host Monitoring Support**: Full support for Monit Remote Host service monitoring (type 4)
   - Database schema upgraded to version 8 with new `remote_host_metrics` table

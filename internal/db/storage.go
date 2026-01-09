@@ -45,9 +45,9 @@ func SetDebugMode(enabled bool) {
 //
 // How it works:
 // 1. Query previous monit_uptime (if host exists)
-// 2. Use INSERT OR REPLACE to upsert the host
+// 2. Use INSERT ... ON CONFLICT DO UPDATE to upsert the host (preserves child records)
 // 3. Update last_seen to current time
-// 4. Preserve created_at for existing hosts
+// 4. Preserve created_at and description for existing hosts
 // 5. Compare old vs new monit_uptime to detect restarts
 // 6. Create event if restart is detected
 //
@@ -95,7 +95,7 @@ func StoreHost(db *sql.DB, server *parser.Server, platform *parser.Platform, sys
 	// - last_seen tells us when we last heard from it
 	// - Together they show: "Known since X, last contact Y"
 	const query = `
-		INSERT OR REPLACE INTO hosts (
+		INSERT INTO hosts (
 			id,
 			hostname,
 			incarnation,
@@ -120,36 +120,30 @@ func StoreHost(db *sql.DB, server *parser.Server, platform *parser.Platform, sys
 			created_at,
 			description
 		) VALUES (
-			?,
-			?,
-			?,
-			?,
-			?,
-			?,
-			?,
-			?,
-			?,
-			?,
-			?,
-			?,
-			?,
-			?,
-			?,
-			?,
-			?,
-			?,
-			?,
-			?,
-			?,
-			COALESCE(
-				(SELECT created_at FROM hosts WHERE id = ?),
-				?
-			),
-			COALESCE(
-				(SELECT description FROM hosts WHERE id = ?),
-				''
-			)
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 		)
+		ON CONFLICT(id) DO UPDATE SET
+			hostname = excluded.hostname,
+			incarnation = excluded.incarnation,
+			version = excluded.version,
+			http_address = excluded.http_address,
+			http_port = excluded.http_port,
+			http_ssl = excluded.http_ssl,
+			http_username = excluded.http_username,
+			http_password = excluded.http_password,
+			os_name = excluded.os_name,
+			os_release = excluded.os_release,
+			os_version = excluded.os_version,
+			machine = excluded.machine,
+			cpu_count = excluded.cpu_count,
+			total_memory = excluded.total_memory,
+			total_swap = excluded.total_swap,
+			system_uptime = excluded.system_uptime,
+			boottime = excluded.boottime,
+			monit_uptime = excluded.monit_uptime,
+			poll_interval = excluded.poll_interval,
+			last_seen = excluded.last_seen
+			-- created_at and description are preserved (not updated)
 	`
 
 	// Get the current time
@@ -188,6 +182,9 @@ func StoreHost(db *sql.DB, server *parser.Server, platform *parser.Platform, sys
 	//   - error: nil if successful, error if failed
 	//
 	// We use _ to ignore the Result (we don't need it)
+	//
+	// For new hosts: all fields are inserted with their values, created_at = now
+	// For existing hosts: fields are updated via ON CONFLICT, created_at and description preserved
 	_, err = db.Exec(
 		query,
 		hostID,
@@ -211,9 +208,8 @@ func StoreHost(db *sql.DB, server *parser.Server, platform *parser.Platform, sys
 		server.Uptime,
 		server.Poll,
 		now,
-		hostID,   // For created_at COALESCE subquery
-		now,      // Default value for created_at
-		hostID,   // For description COALESCE subquery
+		now,  // created_at for new hosts
+		"",   // description for new hosts (empty)
 	)
 
 	// Check if the query failed
@@ -508,8 +504,8 @@ func RecordAvailabilityForAllHosts(db *sql.DB) error {
 func StoreService(db *sql.DB, hostID string, service *parser.Service) error {
 	// SQL query to insert or update the service record
 	//
-	// INSERT OR REPLACE:
-	// - If (host_id, name) exists: update the row
+	// INSERT ... ON CONFLICT DO UPDATE:
+	// - If (host_id, name) exists: update the row in-place
 	// - If (host_id, name) doesn't exist: insert new row
 	//
 	// Why UNIQUE(host_id, name)?
@@ -517,7 +513,7 @@ func StoreService(db *sql.DB, hostID string, service *parser.Service) error {
 	// - Different hosts can have different "nginx" services
 	// - Same host can't have two services with the same name
 	const query = `
-		INSERT OR REPLACE INTO services (
+		INSERT INTO services (
 			host_id,
 			name,
 			type,
@@ -530,6 +526,16 @@ func StoreService(db *sql.DB, hostID string, service *parser.Service) error {
 			collected_at,
 			last_seen
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(host_id, name) DO UPDATE SET
+			type = excluded.type,
+			status = excluded.status,
+			monitor = excluded.monitor,
+			pid = excluded.pid,
+			cpu_percent = excluded.cpu_percent,
+			memory_percent = excluded.memory_percent,
+			memory_kb = excluded.memory_kb,
+			collected_at = excluded.collected_at,
+			last_seen = excluded.last_seen
 	`
 
 	// Get the collection timestamp from the service
@@ -1584,7 +1590,16 @@ type DeleteHostStats struct {
 // - program_metrics
 // - remote_host_metrics
 // - events
+// - host_availability (CASCADE DELETE via schema)
+// - host_hostgroups (CASCADE DELETE via schema)
 // - hosts
+//
+// Note: As of schema v12, all foreign keys have ON DELETE CASCADE, so manual
+// deletion of child records is not strictly necessary for databases created
+// with v12+. However, we keep the explicit deletions for:
+// 1. Backward compatibility with databases created before v12
+// 2. Clear deletion statistics in the return value
+// 3. Explicit transaction control for atomicity
 //
 // For safety, this function will only delete hosts that have been offline
 // for more than 1 hour (last_seen >= 3600 seconds ago).

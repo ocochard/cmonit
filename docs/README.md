@@ -210,7 +210,7 @@ go build -o cmonit ./cmd/cmonit && ./cmonit
 
 ## Database Schema
 
-The database uses schema versioning with automatic migrations (current version: **8**):
+The database uses schema versioning with automatic migrations (current version: **12**):
 
 ### Core Tables
 

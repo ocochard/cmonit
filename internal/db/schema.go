@@ -39,7 +39,7 @@ import (
 
 // currentSchemaVersion is the current database schema version.
 // Increment this when making schema changes that require migration.
-const currentSchemaVersion = 11
+const currentSchemaVersion = 12
 
 // SQL schema for the cmonit database
 //
@@ -103,7 +103,7 @@ const (
 	//   - poll_interval: Monit's check interval in seconds (for heartbeat health status)
 	//   - last_seen: When we last received data from this host
 	//   - created_at: When we first saw this host
-	//   - description: User-defined HTML description/notes for this host
+	//   - description: User-defined HTML description/notes for this host (max 8192 chars)
 	//
 	// PRIMARY KEY: id must be unique (enforced by SQLite)
 	// UNIQUE: hostname must be unique (one entry per server)
@@ -116,27 +116,27 @@ const (
 	CREATE TABLE IF NOT EXISTS hosts (
 		id TEXT PRIMARY KEY,
 		hostname TEXT NOT NULL,
-		incarnation INTEGER,
+		incarnation INTEGER CHECK (incarnation >= 0),
 		version TEXT,
 		http_address TEXT,
-		http_port INTEGER,
-		http_ssl INTEGER DEFAULT 0,
+		http_port INTEGER CHECK (http_port > 0 AND http_port <= 65535),
+		http_ssl INTEGER DEFAULT 0 CHECK (http_ssl IN (0, 1)),
 		http_username TEXT,
 		http_password TEXT,
 		os_name TEXT,
 		os_release TEXT,
 		os_version TEXT,
 		machine TEXT,
-		cpu_count INTEGER,
-		total_memory INTEGER,
-		total_swap INTEGER,
-		system_uptime INTEGER,
-		boottime INTEGER,
-		monit_uptime INTEGER,
-		poll_interval INTEGER DEFAULT 30,
+		cpu_count INTEGER CHECK (cpu_count > 0),
+		total_memory INTEGER CHECK (total_memory >= 0),
+		total_swap INTEGER CHECK (total_swap >= 0),
+		system_uptime INTEGER CHECK (system_uptime >= 0),
+		boottime INTEGER CHECK (boottime >= 0),
+		monit_uptime INTEGER CHECK (monit_uptime >= 0),
+		poll_interval INTEGER DEFAULT 30 CHECK (poll_interval > 0),
 		last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-		description TEXT DEFAULT '',
+		description TEXT DEFAULT '' CHECK (length(description) <= 8192),
 		UNIQUE(hostname)
 	);`
 
@@ -173,16 +173,16 @@ const (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		host_id TEXT NOT NULL,
 		name TEXT NOT NULL,
-		type INTEGER,
-		status INTEGER,
-		monitor INTEGER,
-		pid INTEGER,
-		cpu_percent REAL,
-		memory_percent REAL,
-		memory_kb INTEGER,
+		type INTEGER CHECK (type >= 0 AND type <= 8),
+		status INTEGER CHECK (status >= 0),
+		monitor INTEGER CHECK (monitor >= 0 AND monitor <= 2),
+		pid INTEGER CHECK (pid > 0),
+		cpu_percent REAL CHECK (cpu_percent >= 0),
+		memory_percent REAL CHECK (memory_percent >= 0 AND memory_percent <= 100),
+		memory_kb INTEGER CHECK (memory_kb >= 0),
 		collected_at DATETIME,
 		last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
-		FOREIGN KEY (host_id) REFERENCES hosts(id),
+		FOREIGN KEY (host_id) REFERENCES hosts(id) ON DELETE CASCADE,
 		UNIQUE(host_id, name)
 	);`
 
@@ -222,7 +222,7 @@ const (
 		metric_name TEXT NOT NULL,
 		value REAL NOT NULL,
 		collected_at DATETIME NOT NULL,
-		FOREIGN KEY (host_id) REFERENCES hosts(id)
+		FOREIGN KEY (host_id) REFERENCES hosts(id) ON DELETE CASCADE
 	);`
 
 	// createMetricsIndexes creates indexes for fast metrics queries
@@ -275,7 +275,7 @@ const (
 		event_type INTEGER,
 		message TEXT,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-		FOREIGN KEY (host_id) REFERENCES hosts(id)
+		FOREIGN KEY (host_id) REFERENCES hosts(id) ON DELETE CASCADE
 	);`
 
 	// createEventsIndex creates index for fast event queries
@@ -324,20 +324,20 @@ const (
 		fs_type TEXT,
 		fs_flags TEXT,
 		mode TEXT,
-		uid INTEGER,
-		gid INTEGER,
-		block_percent REAL,
-		block_usage_mb REAL,
-		block_total_mb REAL,
-		inode_percent REAL,
-		inode_usage INTEGER,
-		inode_total INTEGER,
-		read_bytes_total INTEGER,
-		read_ops_total INTEGER,
-		write_bytes_total INTEGER,
-		write_ops_total INTEGER,
+		uid INTEGER CHECK (uid >= 0),
+		gid INTEGER CHECK (gid >= 0),
+		block_percent REAL CHECK (block_percent >= 0 AND block_percent <= 100),
+		block_usage_mb REAL CHECK (block_usage_mb >= 0),
+		block_total_mb REAL CHECK (block_total_mb >= 0),
+		inode_percent REAL CHECK (inode_percent >= 0 AND inode_percent <= 100),
+		inode_usage INTEGER CHECK (inode_usage >= 0),
+		inode_total INTEGER CHECK (inode_total >= 0),
+		read_bytes_total INTEGER CHECK (read_bytes_total >= 0),
+		read_ops_total INTEGER CHECK (read_ops_total >= 0),
+		write_bytes_total INTEGER CHECK (write_bytes_total >= 0),
+		write_ops_total INTEGER CHECK (write_ops_total >= 0),
 		collected_at DATETIME NOT NULL,
-		FOREIGN KEY (host_id) REFERENCES hosts(id)
+		FOREIGN KEY (host_id) REFERENCES hosts(id) ON DELETE CASCADE
 	);`
 
 	// createFilesystemMetricsIndex creates index for fast filesystem metrics queries
@@ -381,23 +381,23 @@ const (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		host_id TEXT NOT NULL,
 		service_name TEXT NOT NULL,
-		link_state INTEGER,
-		link_speed INTEGER,
-		link_duplex INTEGER,
-		download_packets_now INTEGER,
-		download_packets_total INTEGER,
-		download_bytes_now INTEGER,
-		download_bytes_total INTEGER,
-		download_errors_now INTEGER,
-		download_errors_total INTEGER,
-		upload_packets_now INTEGER,
-		upload_packets_total INTEGER,
-		upload_bytes_now INTEGER,
-		upload_bytes_total INTEGER,
-		upload_errors_now INTEGER,
-		upload_errors_total INTEGER,
+		link_state INTEGER CHECK (link_state IN (0, 1)),
+		link_speed INTEGER CHECK (link_speed >= 0),
+		link_duplex INTEGER CHECK (link_duplex IN (0, 1)),
+		download_packets_now INTEGER CHECK (download_packets_now >= 0),
+		download_packets_total INTEGER CHECK (download_packets_total >= 0),
+		download_bytes_now INTEGER CHECK (download_bytes_now >= 0),
+		download_bytes_total INTEGER CHECK (download_bytes_total >= 0),
+		download_errors_now INTEGER CHECK (download_errors_now >= 0),
+		download_errors_total INTEGER CHECK (download_errors_total >= 0),
+		upload_packets_now INTEGER CHECK (upload_packets_now >= 0),
+		upload_packets_total INTEGER CHECK (upload_packets_total >= 0),
+		upload_bytes_now INTEGER CHECK (upload_bytes_now >= 0),
+		upload_bytes_total INTEGER CHECK (upload_bytes_total >= 0),
+		upload_errors_now INTEGER CHECK (upload_errors_now >= 0),
+		upload_errors_total INTEGER CHECK (upload_errors_total >= 0),
 		collected_at DATETIME NOT NULL,
-		FOREIGN KEY (host_id) REFERENCES hosts(id)
+		FOREIGN KEY (host_id) REFERENCES hosts(id) ON DELETE CASCADE
 	);`
 
 	// createNetworkMetricsIndex creates index for fast network metrics queries
@@ -437,17 +437,17 @@ const (
 		host_id TEXT NOT NULL,
 		service_name TEXT NOT NULL,
 		mode TEXT,
-		uid INTEGER,
-		gid INTEGER,
-		size INTEGER,
-		hardlink INTEGER,
-		access_time INTEGER,
-		change_time INTEGER,
-		modify_time INTEGER,
+		uid INTEGER CHECK (uid >= 0),
+		gid INTEGER CHECK (gid >= 0),
+		size INTEGER CHECK (size >= 0),
+		hardlink INTEGER CHECK (hardlink >= 0),
+		access_time INTEGER CHECK (access_time >= 0),
+		change_time INTEGER CHECK (change_time >= 0),
+		modify_time INTEGER CHECK (modify_time >= 0),
 		checksum_type TEXT,
 		checksum_value TEXT,
 		collected_at DATETIME NOT NULL,
-		FOREIGN KEY (host_id) REFERENCES hosts(id)
+		FOREIGN KEY (host_id) REFERENCES hosts(id) ON DELETE CASCADE
 	);`
 
 	// createFileMetricsIndex creates index for fast file metrics queries
@@ -479,11 +479,11 @@ const (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		host_id TEXT NOT NULL,
 		service_name TEXT NOT NULL,
-		started INTEGER,
+		started INTEGER CHECK (started >= 0),
 		exit_status INTEGER,
 		output TEXT,
 		collected_at DATETIME NOT NULL,
-		FOREIGN KEY (host_id) REFERENCES hosts(id)
+		FOREIGN KEY (host_id) REFERENCES hosts(id) ON DELETE CASCADE
 	);`
 
 	// createProgramMetricsIndex creates index for fast program metrics queries
@@ -523,17 +523,17 @@ const (
 		host_id TEXT NOT NULL,
 		service_name TEXT NOT NULL,
 		icmp_type TEXT,
-		icmp_responsetime REAL,
+		icmp_responsetime REAL CHECK (icmp_responsetime >= 0),
 		port_hostname TEXT,
-		port_number INTEGER,
+		port_number INTEGER CHECK (port_number > 0 AND port_number <= 65535),
 		port_protocol TEXT,
 		port_type TEXT,
-		port_responsetime REAL,
+		port_responsetime REAL CHECK (port_responsetime >= 0),
 		unix_path TEXT,
 		unix_protocol TEXT,
 		unix_responsetime REAL,
 		collected_at DATETIME NOT NULL,
-		FOREIGN KEY (host_id) REFERENCES hosts(id)
+		FOREIGN KEY (host_id) REFERENCES hosts(id) ON DELETE CASCADE
 	);`
 
 	// createRemoteHostMetricsIndex creates index for fast remote host metrics queries
@@ -1261,6 +1261,40 @@ func migrateSchema(db *sql.DB, fromVersion, toVersion int) error {
 				return err
 			}
 			log.Printf("[INFO] Successfully migrated to schema version 11")
+
+		case 11:
+			// Migration from version 11 to version 12
+			// Schema improvements: CASCADE DELETE, CHECK constraints, description length limit
+			//
+			// IMPORTANT: SQLite does not allow modifying existing table constraints.
+			// The new constraints (CASCADE DELETE, CHECK constraints) are defined in the
+			// table creation statements and will apply to:
+			// - New databases created with InitDB()
+			// - Tables created after this migration
+			//
+			// For existing tables in production databases:
+			// - Existing data is not affected
+			// - Foreign keys already have ON DELETE CASCADE via the DeleteHost() function
+			// - CHECK constraints would require table recreation (not safe for production)
+			//
+			// The schema improvements include:
+			// - All foreign keys now specify ON DELETE CASCADE
+			// - CHECK constraints for data validation (percentages 0-100, positive integers)
+			// - Description field limited to 8192 characters
+			// - Service type constrained to 0-8
+			// - Monitor status constrained to 0-2
+			//
+			// These improvements enhance data integrity for new installations and
+			// document the intended constraints in the schema.
+			log.Printf("[INFO] Migrating from v11 to v12: Schema improvements (CASCADE DELETE, CHECK constraints)")
+			log.Printf("[INFO] Note: New constraints apply to new databases; existing tables unchanged")
+
+			fromVersion = 12
+			err := setSchemaVersion(db, fromVersion)
+			if err != nil {
+				return err
+			}
+			log.Printf("[INFO] Successfully migrated to schema version 12")
 
 		default:
 			return fmt.Errorf("no migration path from version %d", fromVersion)

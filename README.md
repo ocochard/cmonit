@@ -421,6 +421,15 @@ go build -o cmonit ./cmd/cmonit && ./cmonit
 ./cmonit -h
 ```
 
+## Documentation
+
+For detailed documentation, see the [docs/](docs/) directory:
+
+- **[Troubleshooting Guide](docs/troubleshooting.md)** - Diagnostic commands and solutions to common issues
+- **[Developer Documentation](docs/README.md)** - Architecture, schema, and technical details
+- **[API Documentation](docs/api.md)** - M/Monit-compatible HTTP API reference
+- **[Project Plan](docs/project-plan.md)** - Development roadmap and changelog
+
 ## FreeBSD Installation
 
 For FreeBSD systems, an rc.d startup script is provided:

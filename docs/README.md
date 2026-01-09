@@ -5,6 +5,7 @@ This directory contains technical documentation for cmonit developers and contri
 ## Quick Reference
 
 - **[Project Plan](project-plan.md)** - Architecture, phases, and implementation roadmap
+- **[Troubleshooting Guide](troubleshooting.md)** - Diagnostic commands and common issues
 - **[Monit Collector Protocol](monit-collector-protocol.md)** - Technical details of Monit XML protocol
 - **[Monit XML Reference](monit-xml-reference.md)** - Complete XML field reference
 - **[Testing Plan](testing-plan.md)** - Acceptance tests for all phases

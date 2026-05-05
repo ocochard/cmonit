@@ -482,34 +482,48 @@ func getMMHostsSummary() ([]MMHostSummary, error) {
 // getMMHostDetail retrieves detailed information about a specific host.
 func getMMHostDetail(hostID string) (*MMHostDetail, error) {
 	const query = `
-		SELECT id, hostname, platform, platform_version, cpu_count, memory,
-		       uptime, monit_uptime, version, last_seen
+		SELECT id, hostname, os_name, os_release, machine, cpu_count,
+		       total_memory, system_uptime, monit_uptime, version, last_seen
 		FROM hosts
 		WHERE id = ?
 	`
 
 	var h MMHostDetail
 	var lastSeen time.Time
-	var platformVersion, cpuCount, memory, uptime, monitUptime sql.NullString
+	var osName, osRelease, machine sql.NullString
+	var cpuCount sql.NullInt64
+	var totalMemory, systemUptime, monitUptime sql.NullInt64
 	var version sql.NullString
 
 	err := db.QueryRow(query, hostID).Scan(
-		&h.ID, &h.Hostname, &h.Platform, &platformVersion, &cpuCount,
-		&memory, &uptime, &monitUptime, &version, &lastSeen,
+		&h.ID, &h.Hostname, &osName, &osRelease, &machine, &cpuCount,
+		&totalMemory, &systemUptime, &monitUptime, &version, &lastSeen,
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	h.LastSeen = lastSeen.Format(time.RFC3339)
-	if platformVersion.Valid {
-		h.PlatformVersion = platformVersion.String
+	h.Platform = buildPlatformString(osName, osRelease, machine)
+	if osRelease.Valid {
+		h.PlatformVersion = osRelease.String
+	}
+	if cpuCount.Valid {
+		h.CPUCount = int(cpuCount.Int64)
+	}
+	if totalMemory.Valid {
+		h.Memory = totalMemory.Int64
+	}
+	if systemUptime.Valid {
+		h.Uptime = systemUptime.Int64
+	}
+	if monitUptime.Valid {
+		h.MonitUptime = monitUptime.Int64
 	}
 	if version.Valid {
 		h.MonitVersion = version.String
 	}
+	h.LastSeen = lastSeen.Format(time.RFC3339)
 
-	// Get services for this host
 	services, err := getMMServicesForHost(hostID)
 	if err != nil {
 		return nil, err
@@ -770,6 +784,128 @@ func getLatestSystemMemoryPercent(hostID string) int {
 	}
 
 	return int(percent)
+}
+
+// HandleMMV2AdminHostsList handles GET|POST /api/2/admin/hosts/list
+func HandleMMV2AdminHostsList(w http.ResponseWriter, r *http.Request) {
+	handleMMAdminHostsList(w, r)
+}
+
+// =============================================================================
+// /api/2/ COMPLIANT HANDLERS
+// These handlers follow the exact M/Monit HTTP API spec:
+//   https://mmonit.com/documentation/http-api/static/index.html
+// All parameters are passed as query params (e.g. ?id=185), not path segments.
+// =============================================================================
+
+// HandleMMV2StatusHostsGet handles GET|POST /api/2/status/hosts/get
+//
+// Required query param: id (host id)
+// Optional query params: led, servicepattern
+func HandleMMV2StatusHostsGet(w http.ResponseWriter, r *http.Request) {
+	hostID := r.FormValue("id")
+	if hostID == "" {
+		respondMMError(w, "Missing required parameter: id", http.StatusBadRequest)
+		return
+	}
+
+	host, err := getMMHostDetail(hostID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			respondMMError(w, "Host not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("[ERROR] Failed to get host detail: %v", err)
+		respondMMError(w, "Failed to retrieve host", http.StatusInternalServerError)
+		return
+	}
+
+	respondJSON(w, host, http.StatusOK)
+}
+
+// HandleMMV2StatusHostsSummary handles GET|POST /api/2/status/hosts/summary
+//
+// Optional query params: hostid, hostgroupid
+// Returns count of hosts by status (green/orange/red/gray).
+func HandleMMV2StatusHostsSummary(w http.ResponseWriter, r *http.Request) {
+	const query = `
+		SELECT
+			SUM(CASE WHEN (strftime('%s','now') - last_seen) < poll_interval * 2 THEN 1 ELSE 0 END) AS green,
+			SUM(CASE WHEN (strftime('%s','now') - last_seen) >= poll_interval * 2
+			          AND (strftime('%s','now') - last_seen) < poll_interval * 5 THEN 1 ELSE 0 END) AS orange,
+			SUM(CASE WHEN (strftime('%s','now') - last_seen) >= poll_interval * 5 THEN 1 ELSE 0 END) AS red
+		FROM hosts
+	`
+	var green, orange, red int
+	err := db.QueryRow(query).Scan(&green, &orange, &red)
+	if err != nil {
+		log.Printf("[ERROR] Failed to get status summary: %v", err)
+		respondMMError(w, "Failed to retrieve summary", http.StatusInternalServerError)
+		return
+	}
+
+	summary := []map[string]interface{}{
+		{"label": "green", "data": green},
+		{"label": "orange", "data": orange},
+		{"label": "red", "data": red},
+	}
+	respondJSON(w, map[string]interface{}{"summary": summary}, http.StatusOK)
+}
+
+// HandleMMV2EventsGet handles GET|POST /api/2/reports/events/get
+//
+// Required query param: id (event id)
+func HandleMMV2EventsGet(w http.ResponseWriter, r *http.Request) {
+	eventID := r.FormValue("id")
+	if eventID == "" {
+		respondMMError(w, "Missing required parameter: id", http.StatusBadRequest)
+		return
+	}
+
+	event, err := getMMEventByID(eventID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			respondMMError(w, "Event not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("[ERROR] Failed to get event: %v", err)
+		respondMMError(w, "Failed to retrieve event", http.StatusInternalServerError)
+		return
+	}
+
+	respondJSON(w, event, http.StatusOK)
+}
+
+// HandleMMV2AdminHostsDelete handles GET|POST /api/2/admin/hosts/delete
+//
+// To delete a specific host: id (required)
+// To delete all inactive hosts: inactive=1
+func HandleMMV2AdminHostsDelete(w http.ResponseWriter, r *http.Request) {
+	hostID := r.FormValue("id")
+	if hostID == "" {
+		respondMMError(w, "Missing required parameter: id", http.StatusBadRequest)
+		return
+	}
+
+	stats, err := dbpkg.DeleteHost(db, hostID)
+	if err != nil {
+		if strings.Contains(err.Error(), "host not found") {
+			respondMMError(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		if strings.Contains(err.Error(), "cannot delete host") {
+			respondMMError(w, err.Error(), http.StatusForbidden)
+			return
+		}
+		log.Printf("[ERROR] Failed to delete host %s: %v", hostID, err)
+		respondMMError(w, "Failed to delete host", http.StatusInternalServerError)
+		return
+	}
+
+	respondJSON(w, map[string]interface{}{
+		"deleted": stats.Services + stats.Metrics + stats.FilesystemMetrics +
+			stats.NetworkMetrics + stats.FileMetrics + stats.ProgramMetrics + stats.Events,
+	}, http.StatusOK)
 }
 
 // respondMMError sends an M/Monit-compatible error response.

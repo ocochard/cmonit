@@ -49,17 +49,17 @@ An Open Source central monitoring dashboard for [Monit](https://mmonit.com/downl
 ### Build
 
 ```bash
-# Build with version number (recommended)
-go build -ldflags "-X main.version=1.0" -o cmonit ./cmd/cmonit
-
-# Build without version (shows "dev" as version)
+# Local (macOS/Linux) — development
 go build -o cmonit ./cmd/cmonit
 
-# The resulting binary is self-contained and ready to deploy
-# - Templates are automatically embedded in the binary
-# - No external files (templates, assets) are needed
-# - Version is displayed in the web UI footer
+# With version number
+go build -ldflags "-X main.version=1.0" -o cmonit ./cmd/cmonit
+
+# FreeBSD (production) — pure-Go SQLite, no CGO required
+CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64 go build -o cmonit ./cmd/cmonit
 ```
+
+The binary is self-contained — templates and static assets are embedded.
 
 **Version Management:**
 - Use `-ldflags "-X main.version=X.Y.Z"` to set the version at build time
@@ -408,8 +408,11 @@ Additional recommendations:
 ## Development
 
 ```bash
-# Run tests
-go test ./...
+# Run parser unit tests
+go test ./internal/parser/
+
+# Run API regression tests against a live instance
+go test ./tests/ -url http://localhost:3000
 
 # Clean database
 rm -f cmonit.db cmonit.db-*
@@ -501,27 +504,32 @@ cmonit/
 ├── internal/
 │   ├── config/
 │   │   └── config.go           # Configuration file support (TOML)
+│   ├── control/
+│   │   └── actions.go          # Remote Monit service actions
 │   ├── db/
-│   │   ├── schema.go           # Database setup
+│   │   ├── schema.go           # Database setup and migrations
 │   │   └── storage.go          # Data storage
 │   ├── parser/
 │   │   ├── xml.go              # Monit XML parser
 │   │   └── xml_test.go         # Parser tests
 │   └── web/
 │       ├── handler.go          # Dashboard handlers
-│       ├── api.go              # Metrics API
+│       ├── handlers_status.go  # Status color and aggregation helpers
+│       ├── api.go              # Native JSON API
+│       ├── mmonit_api.go       # M/Monit-compatible API (/api/2/ and legacy paths)
+│       ├── health.go           # Internal health helper functions
 │       └── templates/          # HTML templates (embedded in binary)
-│           ├── dashboard.html  # Main dashboard
-│           ├── status.html     # Status overview
-│           ├── service.html    # Service details
-│           └── events.html     # Events page
+│           ├── dashboard.html
+│           ├── status.html
+│           ├── service.html
+│           └── events.html
+├── tests/
+│   └── api_test.go             # API regression tests (requires -url flag)
 ├── rc.d/
 │   └── cmonit                  # FreeBSD rc.d script
-├── cmonit.conf.sample         # Example configuration file
+├── cmonit.conf.sample          # Example configuration file
 ├── docs/                       # Documentation
-├── go.mod                      # Go dependencies
-└── cmonit.db                   # SQLite database (created at runtime)
-                                # with .db-wal and .db-shm
+└── go.mod                      # Go dependencies
 ```
 
 ## Tech Stack

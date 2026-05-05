@@ -556,6 +556,17 @@ func main() {
 	webMux.HandleFunc("/admin/hosts", web.HandleMMAdminHosts)
 	webMux.HandleFunc("/admin/hosts/", web.HandleMMAdminHosts)
 
+	// M/Monit HTTP API v2 — spec-compliant routes under /api/2/
+	// https://mmonit.com/documentation/http-api/static/index.html
+	// Parameters are passed as query params (e.g. ?id=185), not path segments.
+	webMux.HandleFunc("/api/2/status/hosts/list", web.HandleMMStatusHosts)
+	webMux.HandleFunc("/api/2/status/hosts/get", web.HandleMMV2StatusHostsGet)
+	webMux.HandleFunc("/api/2/status/hosts/summary", web.HandleMMV2StatusHostsSummary)
+	webMux.HandleFunc("/api/2/reports/events/list", web.HandleMMEventsList)
+	webMux.HandleFunc("/api/2/reports/events/get", web.HandleMMV2EventsGet)
+	webMux.HandleFunc("/api/2/admin/hosts/list", web.HandleMMV2AdminHostsList)
+	webMux.HandleFunc("/api/2/admin/hosts/delete", web.HandleMMV2AdminHostsDelete)
+
 	// Start the collector HTTP server in a goroutine (lightweight thread)
 	//
 	// The "go" keyword runs a function concurrently

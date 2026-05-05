@@ -25,16 +25,7 @@ import (
 	"fmt"          // Formatted I/O
 	"log"          // Logging
 
-	// Third-party imports
-	// The underscore (_) means "import for side effects only"
-	// We don't use the sqlite3 package directly, but importing it
-	// registers the SQLite driver with database/sql
-	//
-	// This is Go's way of plugin-style architecture:
-	// - database/sql provides the interface
-	// - mattn/go-sqlite3 provides the SQLite implementation
-	// - The registration happens automatically when imported
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite" // pure-Go SQLite driver, registers as "sqlite"
 )
 
 // currentSchemaVersion is the current database schema version.
@@ -664,17 +655,9 @@ func InitDB(dbPath string) (*sql.DB, error) {
 	// The actual connection happens on the first query.
 	//
 	// Parameters:
-	//   - "sqlite3": The driver name (registered by the import)
+	//   - "sqlite": The driver name registered by modernc.org/sqlite
 	//   - dbPath: The database file path
-	//
-	// Returns:
-	//   - *sql.DB: A database connection pool
-	//   - error: nil if the driver exists, error if driver not found
-	//
-	// Why "sqlite3"?
-	// - This is the name the driver registered when we imported it
-	// - Different drivers use different names (postgres, mysql, etc.)
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		// Failed to open database
 		// This usually means the SQLite driver isn't available

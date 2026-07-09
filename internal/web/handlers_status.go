@@ -95,6 +95,12 @@ func HandleHostEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 // getStatusData queries the database and builds StatusData for the main status page.
+//
+// Originally this ran 5 queries per host (services, cpu, memory, event count,
+// hostgroups) - an N+1 pattern that scaled linearly with host count. It now
+// issues a fixed number of grouped queries and assembles per-host results
+// from Go maps keyed by host_id, preserving the exact output fields/defaults
+// of the previous per-host implementation.
 func getStatusData() (*StatusData, error) {
 	const hostsQuery = `
 		SELECT id, hostname, last_seen
@@ -125,40 +131,58 @@ func getStatusData() (*StatusData, error) {
 		// Check if host is stale (not seen in 5+ minutes)
 		hostStatus.IsStale = time.Since(hostStatus.LastSeen) > 5*time.Minute
 
-		// Get services for this host to calculate status
-		services, err := getServicesForHost(hostStatus.ID)
-		if err != nil {
-			log.Printf("[ERROR] Failed to get services for host %s: %v", hostStatus.ID, err)
-			services = []Service{}
-		}
-
-		// Calculate overall host status based on services and staleness
-		calculateHostStatus(&hostStatus, services)
-
-		// Get system CPU and memory from the metrics table
-		cpuPercent, memPercent := getSystemMetrics(hostStatus.ID, hostStatus.Hostname)
-		hostStatus.CPUPercent = cpuPercent
-		hostStatus.MemoryPercent = memPercent
-
-		// Get event count for this host
-		hostStatus.EventCount, err = getEventCount(hostStatus.ID)
-		if err != nil {
-			log.Printf("[ERROR] Failed to get event count for host %s: %v", hostStatus.ID, err)
-			hostStatus.EventCount = 0
-		}
-
-		// Get hostgroups for this host
-		hostStatus.Groups, err = getHostGroups(hostStatus.ID)
-		if err != nil {
-			log.Printf("[ERROR] Failed to get hostgroups for host %s: %v", hostStatus.ID, err)
-			hostStatus.Groups = []string{}
-		}
-
 		hosts = append(hosts, hostStatus)
 	}
 
 	if err = rows.Err(); err != nil {
 		return nil, err
+	}
+
+	servicesByHost, err := getServicesGroupedByHost()
+	if err != nil {
+		log.Printf("[ERROR] Failed to get services for status page: %v", err)
+		servicesByHost = map[string][]Service{}
+	}
+
+	cpuByHost, memByHost, err := getLatestSystemMetricsGroupedByHost()
+	if err != nil {
+		log.Printf("[ERROR] Failed to get system metrics for status page: %v", err)
+		cpuByHost = map[string]float64{}
+		memByHost = map[string]float64{}
+	}
+
+	eventCountByHost, err := getEventCountsGroupedByHost()
+	if err != nil {
+		log.Printf("[ERROR] Failed to get event counts for status page: %v", err)
+		eventCountByHost = map[string]int{}
+	}
+
+	groupsByHost, err := getHostGroupsGroupedByHost()
+	if err != nil {
+		log.Printf("[ERROR] Failed to get hostgroups for status page: %v", err)
+		groupsByHost = map[string][]string{}
+	}
+
+	for i := range hosts {
+		hostStatus := &hosts[i]
+
+		services := servicesByHost[hostStatus.ID]
+		calculateHostStatus(hostStatus, services)
+
+		if cpu, ok := cpuByHost[hostStatus.ID]; ok {
+			hostStatus.CPUPercent = &cpu
+		}
+		if mem, ok := memByHost[hostStatus.ID]; ok {
+			hostStatus.MemoryPercent = &mem
+		}
+
+		hostStatus.EventCount = eventCountByHost[hostStatus.ID] // defaults to 0 if absent
+
+		if groups, ok := groupsByHost[hostStatus.ID]; ok {
+			hostStatus.Groups = groups
+		} else {
+			hostStatus.Groups = []string{}
+		}
 	}
 
 	// Get all unique hostgroup names for the filter dropdown
@@ -174,6 +198,189 @@ func getStatusData() (*StatusData, error) {
 		AppVersion: appVersion,
 		Groups:     allGroups,
 	}, nil
+}
+
+// getServicesGroupedByHost loads every host's services in one query and
+// buckets them by host_id, replacing N per-host getServicesForHost calls.
+func getServicesGroupedByHost() (map[string][]Service, error) {
+	const query = `
+		SELECT host_id, name, type, status, monitor, pid, cpu_percent, memory_percent, memory_kb, collected_at
+		FROM services
+		ORDER BY host_id, type, name
+	`
+
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[string][]Service)
+
+	for rows.Next() {
+		var hostID string
+		var svc Service
+
+		err := rows.Scan(
+			&hostID,
+			&svc.Name,
+			&svc.Type,
+			&svc.Status,
+			&svc.Monitor,
+			&svc.PID,
+			&svc.CPUPercent,
+			&svc.MemoryPercent,
+			&svc.MemoryKB,
+			&svc.CollectedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		svc.TypeName = getServiceTypeName(svc.Type)
+		svc.StatusName, svc.StatusColor = getServiceStatusInfo(svc.Status)
+
+		result[hostID] = append(result[hostID], svc)
+	}
+
+	return result, rows.Err()
+}
+
+// getLatestSystemMetricsGroupedByHost returns each host's most recent total
+// CPU percent and memory percent, keyed by host_id.
+//
+// metric_type 'cpu'/'memory' are written exclusively by StoreSystemMetrics
+// for the type-5 system service, so grouping by host_id alone (without
+// matching service_name to hostname, as the old per-host query did) is
+// sufficient - there is only ever one service per host writing these
+// metric_types.
+func getLatestSystemMetricsGroupedByHost() (map[string]float64, map[string]float64, error) {
+	const cpuQuery = `
+		WITH latest_cpu AS (
+			SELECT host_id, MAX(collected_at) AS max_collected
+			FROM metrics
+			WHERE metric_type = 'cpu'
+			GROUP BY host_id
+		)
+		SELECT m.host_id,
+			SUM(CASE WHEN m.metric_name = 'user' THEN m.value ELSE 0 END) +
+			SUM(CASE WHEN m.metric_name = 'system' THEN m.value ELSE 0 END) +
+			SUM(CASE WHEN m.metric_name = 'nice' THEN m.value ELSE 0 END) +
+			SUM(CASE WHEN m.metric_name = 'wait' THEN m.value ELSE 0 END) AS total_cpu
+		FROM metrics m
+		JOIN latest_cpu lc ON m.host_id = lc.host_id AND m.collected_at = lc.max_collected
+		WHERE m.metric_type = 'cpu'
+		GROUP BY m.host_id
+	`
+
+	cpuByHost := make(map[string]float64)
+
+	cpuRows, err := db.Query(cpuQuery)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer cpuRows.Close()
+
+	for cpuRows.Next() {
+		var hostID string
+		var cpu float64
+		if err := cpuRows.Scan(&hostID, &cpu); err != nil {
+			return nil, nil, err
+		}
+		cpuByHost[hostID] = cpu
+	}
+	if err := cpuRows.Err(); err != nil {
+		return nil, nil, err
+	}
+
+	const memQuery = `
+		WITH latest_mem AS (
+			SELECT host_id, MAX(collected_at) AS max_collected
+			FROM metrics
+			WHERE metric_type = 'memory' AND metric_name = 'percent'
+			GROUP BY host_id
+		)
+		SELECT m.host_id, m.value
+		FROM metrics m
+		JOIN latest_mem lm ON m.host_id = lm.host_id AND m.collected_at = lm.max_collected
+		WHERE m.metric_type = 'memory' AND m.metric_name = 'percent'
+	`
+
+	memByHost := make(map[string]float64)
+
+	memRows, err := db.Query(memQuery)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer memRows.Close()
+
+	for memRows.Next() {
+		var hostID string
+		var mem float64
+		if err := memRows.Scan(&hostID, &mem); err != nil {
+			return nil, nil, err
+		}
+		memByHost[hostID] = mem
+	}
+
+	return cpuByHost, memByHost, memRows.Err()
+}
+
+// getEventCountsGroupedByHost returns the event count per host_id, replacing
+// N per-host getEventCount calls with one GROUP BY query.
+func getEventCountsGroupedByHost() (map[string]int, error) {
+	const query = `
+		SELECT host_id, COUNT(*)
+		FROM events
+		GROUP BY host_id
+	`
+
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[string]int)
+	for rows.Next() {
+		var hostID string
+		var count int
+		if err := rows.Scan(&hostID, &count); err != nil {
+			return nil, err
+		}
+		result[hostID] = count
+	}
+
+	return result, rows.Err()
+}
+
+// getHostGroupsGroupedByHost returns each host's group names (sorted
+// ascending, matching the old per-host getHostGroups order), keyed by
+// host_id.
+func getHostGroupsGroupedByHost() (map[string][]string, error) {
+	const query = `
+		SELECT hhg.host_id, hg.name
+		FROM host_hostgroups hhg
+		INNER JOIN hostgroups hg ON hg.id = hhg.hostgroup_id
+		ORDER BY hg.name ASC
+	`
+
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[string][]string)
+	for rows.Next() {
+		var hostID, groupName string
+		if err := rows.Scan(&hostID, &groupName); err != nil {
+			return nil, err
+		}
+		result[hostID] = append(result[hostID], groupName)
+	}
+
+	return result, rows.Err()
 }
 
 // getHostDetailData gets detailed data for a single host (for the detail page).
@@ -354,16 +561,6 @@ func calculateHostStatus(hostStatus *HostStatus, services []Service) {
 	}
 }
 
-// getEventCount returns the number of events for a given host.
-func getEventCount(hostID string) (int, error) {
-	var count int
-	err := db.QueryRow("SELECT COUNT(*) FROM events WHERE host_id = ?", hostID).Scan(&count)
-	if err != nil {
-		return 0, err
-	}
-	return count, nil
-}
-
 // getEventTypeName converts Monit event type number to name.
 //
 // Monit event types (from monit documentation):
@@ -501,58 +698,6 @@ func HandleServiceDetail(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("[ERROR] Failed to render template: %v", err)
 	}
-}
-
-// getSystemMetrics retrieves the latest CPU and memory metrics for a host.
-//
-// Returns CPU and memory percentages from the metrics table.
-// CPU is calculated as the sum of user + system + nice + wait.
-// Memory is retrieved directly from the 'percent' metric.
-//
-// Returns nil pointers if metrics are not available.
-func getSystemMetrics(hostID, hostname string) (*float64, *float64) {
-	// Query for the most recent CPU metrics (user, system, nice, wait)
-	// We need to sum these to get total CPU usage
-	const cpuQuery = `
-		SELECT
-			SUM(CASE WHEN metric_name = 'user' THEN value ELSE 0 END) +
-			SUM(CASE WHEN metric_name = 'system' THEN value ELSE 0 END) +
-			SUM(CASE WHEN metric_name = 'nice' THEN value ELSE 0 END) +
-			SUM(CASE WHEN metric_name = 'wait' THEN value ELSE 0 END) as total_cpu
-		FROM metrics
-		WHERE host_id = ? AND service_name = ? AND metric_type = 'cpu'
-		AND collected_at = (
-			SELECT MAX(collected_at)
-			FROM metrics
-			WHERE host_id = ? AND metric_type = 'cpu'
-		)
-	`
-
-	var cpuPercent float64
-	err := db.QueryRow(cpuQuery, hostID, hostname, hostID).Scan(&cpuPercent)
-	if err != nil {
-		// If no CPU data found, return nil
-		cpuPercent = 0
-	}
-
-	// Query for memory percentage
-	const memQuery = `
-		SELECT value
-		FROM metrics
-		WHERE host_id = ? AND service_name = ?
-		  AND metric_type = 'memory' AND metric_name = 'percent'
-		ORDER BY collected_at DESC
-		LIMIT 1
-	`
-
-	var memPercent float64
-	err = db.QueryRow(memQuery, hostID, hostname).Scan(&memPercent)
-	if err != nil {
-		// If no memory data found, return nil
-		return &cpuPercent, nil
-	}
-
-	return &cpuPercent, &memPercent
 }
 
 // getServiceDetailData retrieves detailed information about a specific service.
@@ -1189,34 +1334,6 @@ func getAvailabilityData(hostID string, hours int) (*AvailabilityResponse, error
 		Hostname:   hostname,
 		Datapoints: datapoints,
 	}, nil
-}
-
-// getHostGroups returns the list of hostgroup names for a given host.
-func getHostGroups(hostID string) ([]string, error) {
-	const query = `
-		SELECT hg.name
-		FROM hostgroups hg
-		INNER JOIN host_hostgroups hhg ON hg.id = hhg.hostgroup_id
-		WHERE hhg.host_id = ?
-		ORDER BY hg.name ASC
-	`
-
-	rows, err := db.Query(query, hostID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var groups []string
-	for rows.Next() {
-		var groupName string
-		if err := rows.Scan(&groupName); err != nil {
-			return nil, err
-		}
-		groups = append(groups, groupName)
-	}
-
-	return groups, rows.Err()
 }
 
 // getAllHostGroups returns all unique hostgroup names for the filter dropdown.

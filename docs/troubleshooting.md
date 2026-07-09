@@ -259,6 +259,68 @@ sudo sqlite3 /var/run/cmonit/cmonit.db "VACUUM;"
 sudo service cmonit start
 ```
 
+### Isolating Slow Dashboard Loads
+
+When the status page is slow, narrow down where the time goes before changing
+code. Don't guess — measure.
+
+**1. Rule out network/DNS/connect overhead:**
+```bash
+curl -s -o /dev/null -w "dns=%{time_namelookup}s connect=%{time_connect}s ttfb=%{time_starttransfer}s total=%{time_total}s\n" http://HOST:3000/
+```
+If `ttfb` is nearly all of `total`, the delay is server-side (Go handler +
+SQLite), not the network.
+
+**2. Check for CPU pegging vs I/O wait (indicates full table scan vs normal work):**
+```bash
+ps aux | grep cmonit | grep -v grep   # sustained high %CPU across samples = likely a full scan
+```
+On FreeBSD, `sudo procstat -k <pid>` shows kernel stack traces for every
+thread. Repeated `zfs_lz4_decompress arc_read dbuf_read ...` frames mean real
+disk I/O (e.g. a full-table scan), not a Go-level infinite loop.
+
+**3. Time each status-page query individually, using the same driver as
+production** (not the `sqlite3` CLI — timings can differ significantly
+between the C sqlite3 library and the pure-Go `modernc.org/sqlite` driver
+cmonit uses). Use `cmd/qdiag`, a small tool that opens the database
+read-only and times each of the status page's queries (`hosts`, `services`,
+`cpu`, `mem`, `events`, `hostgroups`, `allhostgroups`):
+```bash
+go build -o qdiag ./cmd/qdiag
+CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64 go build -o qdiag ./cmd/qdiag  # cross-compile for the deploy target
+scp qdiag autobuilder.example.net:/tmp/qdiag
+ssh autobuilder.example.net '/tmp/qdiag -plan /var/run/cmonit/cmonit.db'
+```
+`-plan` also prints `EXPLAIN QUERY PLAN` for each query and flags
+non-covering searches / full scans. This isolates which specific query is
+slow without touching the live service or its traffic. If the query list no
+longer matches `internal/web/handlers_status.go` (e.g. after a schema or
+query change), update `cmd/qdiag/main.go` to match.
+
+**4. Check the query plan for the slow query:**
+```bash
+sqlite3 -readonly /var/run/cmonit/cmonit.db "EXPLAIN QUERY PLAN <query>;"
+```
+Look for `SEARCH ... USING INDEX` (non-covering — must fetch matching rows
+from the table to check an unindexed filter column) vs
+`SEARCH ... USING COVERING INDEX` (all needed columns are in the index, no
+table lookups). A non-covering scan over a multi-million-row table is a
+classic silent regression: the index exists and gets used, `EXPLAIN QUERY
+PLAN` looks "fine" at a glance, but every matching row still costs a table
+lookup. Fix by adding the missing filter column to the index (or a new index)
+so the scan becomes covering.
+
+**5. Check WAL health** (relevant on write-heavy hosts — e.g. many Monit
+agents polling in):
+```bash
+ls -la /var/run/cmonit/cmonit.db-wal
+sudo -u nobody sqlite3 /var/run/cmonit/cmonit.db "PRAGMA wal_checkpoint(PASSIVE);"
+```
+The `-wal` file's on-disk size doesn't shrink after a passive checkpoint
+(SQLite reuses the space) — check the checkpoint's `(busy, log, checkpointed)`
+output instead: if `log` (frames currently pending) is small, WAL isn't the
+bottleneck even if the file itself is large.
+
 ### High Memory Usage
 
 **Check cmonit process memory:**

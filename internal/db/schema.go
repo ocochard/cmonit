@@ -24,6 +24,7 @@ import (
 	"database/sql" // SQL database interface (works with any SQL database)
 	"fmt"          // Formatted I/O
 	"log"          // Logging
+	"time"         // Connection pool lifetime
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver, registers as "sqlite"
 )
@@ -232,9 +233,28 @@ const (
 	//
 	// idx_metrics_time: Optimizes queries like:
 	//   "Delete all metrics older than 30 days"
+	//
+	// idx_metrics_type_host: Optimizes the status-page "latest cpu value per
+	// host" query, which filters by metric_type only (no metric_name
+	// constraint - cpu sums 4 metric_names) and groups by host_id without a
+	// service_name constraint - idx_metrics_lookup can't serve that (host_id
+	// is its leading column, not metric_type).
+	//
+	// idx_metrics_type_name_host: The "latest memory percent per host" query
+	// additionally filters on metric_name = 'percent'. Without metric_name in
+	// the index, SQLite can use idx_metrics_type_host for the metric_type
+	// prefix but must fetch every matching row from the table to check
+	// metric_name (non-covering SEARCH), which is far slower than the
+	// covering-index case on a multi-million-row table. This index puts
+	// metric_type+metric_name as the equality prefix so the memory/percent
+	// query is a pure covering-index scan, same as the cpu query above.
 	createMetricsIndexes = `
 	CREATE INDEX IF NOT EXISTS idx_metrics_lookup
 		ON metrics(host_id, service_name, metric_type, metric_name, collected_at);
+	CREATE INDEX IF NOT EXISTS idx_metrics_type_host
+		ON metrics(metric_type, host_id, collected_at DESC);
+	CREATE INDEX IF NOT EXISTS idx_metrics_type_name_host
+		ON metrics(metric_type, metric_name, host_id, collected_at DESC);
 	CREATE INDEX IF NOT EXISTS idx_metrics_time
 		ON metrics(collected_at);`
 
@@ -269,15 +289,20 @@ const (
 		FOREIGN KEY (host_id) REFERENCES hosts(id) ON DELETE CASCADE
 	);`
 
-	// createEventsIndex creates index for fast event queries
+	// createEventsIndex creates indexes for fast event queries
 	//
 	// We usually query events in reverse chronological order:
 	// "Show me the 50 most recent events"
 	//
+	// idx_events_host also covers "how many events does host X have" (getEventCount),
+	// which without it was a full table scan since events has no other index on host_id.
+	//
 	// DESC means descending order (newest first)
 	createEventsIndex = `
 	CREATE INDEX IF NOT EXISTS idx_events_time
-		ON events(created_at DESC);`
+		ON events(created_at DESC);
+	CREATE INDEX IF NOT EXISTS idx_events_host
+		ON events(host_id, created_at DESC);`
 
 	// createFilesystemMetricsTable creates the filesystem_metrics table
 	//
@@ -763,6 +788,34 @@ func InitDB(dbPath string) (*sql.DB, error) {
 		// Log warning but continue (not critical)
 		log.Printf("[WARN] Failed to enable WAL mode: %v", err)
 	}
+
+	// busy_timeout makes SQLite retry for up to 5s instead of immediately
+	// returning SQLITE_BUSY when another connection holds the write lock -
+	// avoids spurious errors under concurrent collector writes.
+	_, err = db.Exec("PRAGMA busy_timeout = 5000;")
+	if err != nil {
+		log.Printf("[WARN] Failed to set busy_timeout: %v", err)
+	}
+
+	// synchronous=NORMAL is safe (not just fast) under WAL: WAL only loses
+	// the most recent transactions on an OS crash, never corrupts the db.
+	_, err = db.Exec("PRAGMA synchronous = NORMAL;")
+	if err != nil {
+		log.Printf("[WARN] Failed to set synchronous mode: %v", err)
+	}
+
+	// cache_size is negative-KB (here ~8MB) rather than a page count.
+	_, err = db.Exec("PRAGMA cache_size = -8000;")
+	if err != nil {
+		log.Printf("[WARN] Failed to set cache_size: %v", err)
+	}
+
+	// Cap the connection pool. SQLite serializes writers regardless of pool
+	// size, so a large pool just means more contention/timeouts; a modest
+	// cap avoids exhausting file descriptors while still allowing
+	// concurrent readers.
+	db.SetMaxOpenConns(10)
+	db.SetConnMaxLifetime(time.Hour)
 
 	// Create all tables
 	//

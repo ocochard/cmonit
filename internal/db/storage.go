@@ -25,6 +25,15 @@ func SetDebugMode(enabled bool) {
 	debugMode = enabled
 }
 
+// queryer is satisfied by both *sql.DB and *sql.Tx, letting the Store*
+// helpers below run either standalone or as part of a caller-managed
+// transaction (see StoreMonitStatus) without duplicating each function.
+type queryer interface {
+	Exec(query string, args ...interface{}) (sql.Result, error)
+	QueryRow(query string, args ...interface{}) *sql.Row
+	Query(query string, args ...interface{}) (*sql.Rows, error)
+}
+
 // StoreHost saves or updates a host record in the database.
 //
 // This function is called every time we receive status data from a Monit agent.
@@ -52,7 +61,7 @@ func SetDebugMode(enabled bool) {
 // 6. Create event if restart is detected
 //
 // Thread-safety: Safe to call from multiple goroutines (database/sql handles locking)
-func StoreHost(db *sql.DB, server *parser.Server, platform *parser.Platform, systemService *parser.Service) error {
+func StoreHost(db queryer, server *parser.Server, platform *parser.Platform, systemService *parser.Service) error {
 	// Generate an ID if Monit doesn't provide one
 	//
 	// Monit only sends an <id> field if "set idfile" is configured.
@@ -283,7 +292,7 @@ func StoreHost(db *sql.DB, server *parser.Server, platform *parser.Platform, sys
 // Example usage:
 //   StoreEvent(db, "host123", "nginx", 0x20, "Connection failed")
 //   StoreEvent(db, "host123", "webserver", 0x40000, "Monit daemon restarted")
-func StoreEvent(db *sql.DB, hostID, serviceName string, eventType int, message string) error {
+func StoreEvent(db queryer, hostID, serviceName string, eventType int, message string) error {
 	const query = `
 		INSERT INTO events (
 			host_id,
@@ -326,7 +335,7 @@ func StoreEvent(db *sql.DB, hostID, serviceName string, eventType int, message s
 //
 // Example usage:
 //   RecordHostAvailability(db, "host123", time.Now().Unix(), 60)
-func RecordHostAvailability(db *sql.DB, hostID string, timestamp int64, pollInterval int64) error {
+func RecordHostAvailability(db queryer, hostID string, timestamp int64, pollInterval int64) error {
 	// Get the last_seen time from the hosts table to check connectivity
 	var lastSeen int64
 	err := db.QueryRow("SELECT CAST(strftime('%s', last_seen) AS INTEGER) FROM hosts WHERE id = ?", hostID).Scan(&lastSeen)
@@ -486,6 +495,40 @@ func RecordAvailabilityForAllHosts(db *sql.DB) error {
 	return nil
 }
 
+// PruneOldData deletes metrics and events older than retentionDays.
+//
+// metrics/events are append-only time-series tables; without pruning they
+// grow without bound. Called periodically from a background goroutine
+// (see main.go), not on every write, since it's a bulk operation.
+//
+// retentionDays <= 0 is treated as the default (30 days) rather than
+// disabling pruning, since 0 would otherwise delete everything.
+func PruneOldData(db *sql.DB, retentionDays int) error {
+	if retentionDays <= 0 {
+		retentionDays = 30
+	}
+
+	cutoff := time.Now().AddDate(0, 0, -retentionDays)
+
+	metricsResult, err := db.Exec("DELETE FROM metrics WHERE collected_at < ?", cutoff)
+	if err != nil {
+		return fmt.Errorf("failed to prune metrics: %w", err)
+	}
+
+	eventsResult, err := db.Exec("DELETE FROM events WHERE created_at < ?", cutoff)
+	if err != nil {
+		return fmt.Errorf("failed to prune events: %w", err)
+	}
+
+	if debugMode {
+		metricsDeleted, _ := metricsResult.RowsAffected()
+		eventsDeleted, _ := eventsResult.RowsAffected()
+		log.Printf("[DEBUG] Pruned %d metrics rows and %d events rows older than %s", metricsDeleted, eventsDeleted, cutoff.Format(time.RFC3339))
+	}
+
+	return nil
+}
+
 // StoreService saves or updates a service record in the database.
 //
 // This function stores the current status of a monitored service.
@@ -501,7 +544,7 @@ func RecordAvailabilityForAllHosts(db *sql.DB) error {
 //
 // Note: This only stores the service status, not the metrics.
 // Metrics (CPU%, memory%, etc.) are stored separately in StoreMetrics.
-func StoreService(db *sql.DB, hostID string, service *parser.Service) error {
+func StoreService(db queryer, hostID string, service *parser.Service) error {
 	// SQL query to insert or update the service record
 	//
 	// INSERT ... ON CONFLICT DO UPDATE:
@@ -611,7 +654,7 @@ func StoreService(db *sql.DB, hostID string, service *parser.Service) error {
 // Example usage:
 //   StoreMetric(db, "host123", "system", "cpu", "user", 25.5, time.Now())
 //   StoreMetric(db, "host123", "system", "memory", "percent", 45.2, time.Now())
-func StoreMetric(db *sql.DB, hostID, serviceName, metricType, metricName string, value float64, collectedAt time.Time) error {
+func StoreMetric(db queryer, hostID, serviceName, metricType, metricName string, value float64, collectedAt time.Time) error {
 	// SQL query to insert a metric data point
 	//
 	// Note: We use INSERT (not INSERT OR REPLACE) because:
@@ -669,7 +712,7 @@ func StoreMetric(db *sql.DB, hostID, serviceName, metricType, metricName string,
 //
 // Returns:
 //   - error: nil if all metrics stored successfully, error if any failed
-func StoreSystemMetrics(db *sql.DB, hostID string, service *parser.Service) error {
+func StoreSystemMetrics(db queryer, hostID string, service *parser.Service) error {
 	// Check if this is actually a system service
 	if service.Type != 5 {
 		// Not a system service, nothing to do
@@ -789,7 +832,7 @@ func StoreSystemMetrics(db *sql.DB, hostID string, service *parser.Service) erro
 //
 // Returns:
 //   - error: nil if successful, error if failed
-func StoreProcessMetrics(db *sql.DB, hostID string, service *parser.Service) error {
+func StoreProcessMetrics(db queryer, hostID string, service *parser.Service) error {
 	// Check if this is a process service
 	if service.Type != 3 {
 		return nil
@@ -887,7 +930,7 @@ func StoreProcessMetrics(db *sql.DB, hostID string, service *parser.Service) err
 //
 // Returns:
 //   - error: nil if successful, error if failed
-func StoreHostGroups(db *sql.DB, hostID string, groupNames []string) error {
+func StoreHostGroups(db queryer, hostID string, groupNames []string) error {
 	if len(groupNames) == 0 {
 		// No groups to store, but we should clear any existing associations
 		_, err := db.Exec("DELETE FROM host_hostgroups WHERE host_id = ?", hostID)
@@ -951,12 +994,23 @@ func StoreMonitStatus(db *sql.DB, status *parser.MonitStatus) error {
 		}
 	}
 
+	// All storage for this update happens in one transaction. modernc.org/sqlite
+	// (like most SQLite drivers) doesn't abort the whole transaction on a
+	// single failed statement, so the existing "log and keep going" error
+	// handling below still applies per-service/per-metric; only a failure in
+	// StoreHost or the final Commit rolls everything back.
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback() // no-op if Commit succeeds
+
 	// Step 2: Store the host information
 	//
 	// This creates or updates the host record in the hosts table.
 	// The host record contains: ID, hostname, version, incarnation, last_seen,
 	// plus platform information (OS, architecture, hardware specs).
-	err := StoreHost(db, &status.Server, &status.Platform, systemService)
+	err = StoreHost(tx, &status.Server, &status.Platform, systemService)
 	if err != nil {
 		// If we can't store the host, don't bother with services/metrics
 		return fmt.Errorf("failed to store host: %w", err)
@@ -966,7 +1020,7 @@ func StoreMonitStatus(db *sql.DB, status *parser.MonitStatus) error {
 	//
 	// Update the hostgroups and host_hostgroups tables with the groups
 	// this host belongs to (from <hostgroups><name>...</name></hostgroups>)
-	err = StoreHostGroups(db, hostID, status.HostGroups)
+	err = StoreHostGroups(tx, hostID, status.HostGroups)
 	if err != nil {
 		// Log warning but don't fail the entire operation
 		log.Printf("[WARN] Failed to store host groups for %s: %v", hostID, err)
@@ -987,7 +1041,7 @@ func StoreMonitStatus(db *sql.DB, status *parser.MonitStatus) error {
 		service := &status.Services[i]
 
 		// Store service status (use generated hostID)
-		err = StoreService(db, hostID, service)
+		err = StoreService(tx, hostID, service)
 		if err != nil {
 			// Log the error but continue with other services
 			// We don't want one bad service to break everything
@@ -998,48 +1052,48 @@ func StoreMonitStatus(db *sql.DB, status *parser.MonitStatus) error {
 		// Store metrics based on service type
 		switch service.Type {
 		case 5: // System service
-			err = StoreSystemMetrics(db, hostID, service)
+			err = StoreSystemMetrics(tx, hostID, service)
 			if err != nil {
 				log.Printf("[WARN] Failed to store system metrics for %s: %v", service.Name, err)
 			}
 
 		case 3: // Process service
-			err = StoreProcessMetrics(db, hostID, service)
+			err = StoreProcessMetrics(tx, hostID, service)
 			if err != nil {
 				log.Printf("[WARN] Failed to store process metrics for %s: %v", service.Name, err)
 			}
 			// Process services can also have Port and Unix socket checks
-			err = StoreRemoteHostMetrics(db, hostID, service)
+			err = StoreRemoteHostMetrics(tx, hostID, service)
 			if err != nil {
 				log.Printf("[WARN] Failed to store remote host metrics for %s: %v", service.Name, err)
 			}
 
 		case 4: // Remote host service
-			err = StoreRemoteHostMetrics(db, hostID, service)
+			err = StoreRemoteHostMetrics(tx, hostID, service)
 			if err != nil {
 				log.Printf("[WARN] Failed to store remote host metrics for %s: %v", service.Name, err)
 			}
 
 		case 0: // Filesystem service
-			err = StoreFilesystemMetrics(db, hostID, service)
+			err = StoreFilesystemMetrics(tx, hostID, service)
 			if err != nil {
 				log.Printf("[WARN] Failed to store filesystem metrics for %s: %v", service.Name, err)
 			}
 
 		case 2: // File service
-			err = StoreFileMetrics(db, hostID, service)
+			err = StoreFileMetrics(tx, hostID, service)
 			if err != nil {
 				log.Printf("[WARN] Failed to store file metrics for %s: %v", service.Name, err)
 			}
 
 		case 7: // Program service
-			err = StoreProgramMetrics(db, hostID, service)
+			err = StoreProgramMetrics(tx, hostID, service)
 			if err != nil {
 				log.Printf("[WARN] Failed to store program metrics for %s: %v", service.Name, err)
 			}
 
 		case 8: // Network interface service
-			err = StoreNetworkMetrics(db, hostID, service)
+			err = StoreNetworkMetrics(tx, hostID, service)
 			if err != nil {
 				log.Printf("[WARN] Failed to store network metrics for %s: %v", service.Name, err)
 			}
@@ -1054,7 +1108,7 @@ func StoreMonitStatus(db *sql.DB, status *parser.MonitStatus) error {
 	// - A service was removed from Monit configuration
 	// - A service was renamed
 	// - A monitored process/filesystem was removed
-	result, err := db.Exec(`
+	result, err := tx.Exec(`
 		DELETE FROM services
 		WHERE host_id = ? AND last_seen < ?
 	`, hostID, updateTime)
@@ -1066,6 +1120,10 @@ func StoreMonitStatus(db *sql.DB, status *parser.MonitStatus) error {
 		if rowsAffected > 0 {
 			log.Printf("[INFO] Removed %d stale service(s) for host %s", rowsAffected, status.Server.LocalHostname)
 		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	// Success!
@@ -1090,7 +1148,7 @@ func StoreMonitStatus(db *sql.DB, status *parser.MonitStatus) error {
 //
 // Returns:
 //   - error: nil if successful, error describing problem if failed
-func StoreFilesystemMetrics(db *sql.DB, hostID string, service *parser.Service) error {
+func StoreFilesystemMetrics(db queryer, hostID string, service *parser.Service) error {
 	// Check if this is actually a filesystem service
 	if service.Type != 0 {
 		// Not a filesystem service, nothing to do
@@ -1198,7 +1256,7 @@ func StoreFilesystemMetrics(db *sql.DB, hostID string, service *parser.Service) 
 //
 // Returns:
 //   - error: nil if successful, error describing problem if failed
-func StoreNetworkMetrics(db *sql.DB, hostID string, service *parser.Service) error {
+func StoreNetworkMetrics(db queryer, hostID string, service *parser.Service) error {
 	// Check if this is actually a network interface service
 	if service.Type != 8 {
 		// Not a network interface service, nothing to do
@@ -1291,7 +1349,7 @@ func StoreNetworkMetrics(db *sql.DB, hostID string, service *parser.Service) err
 //
 // Returns:
 //   - error: nil if successful, error describing problem if failed
-func StoreFileMetrics(db *sql.DB, hostID string, service *parser.Service) error {
+func StoreFileMetrics(db queryer, hostID string, service *parser.Service) error {
 	// Check if this is actually a file service
 	if service.Type != 2 {
 		// Not a file service, nothing to do
@@ -1361,7 +1419,7 @@ func StoreFileMetrics(db *sql.DB, hostID string, service *parser.Service) error 
 //
 // Returns:
 //   - error: nil if successful, error describing problem if failed
-func StoreProgramMetrics(db *sql.DB, hostID string, service *parser.Service) error {
+func StoreProgramMetrics(db queryer, hostID string, service *parser.Service) error {
 	// Check if this is actually a program service
 	if service.Type != 7 {
 		// Not a program service, nothing to do
@@ -1421,7 +1479,7 @@ func StoreProgramMetrics(db *sql.DB, hostID string, service *parser.Service) err
 //
 // Returns:
 //   - error: nil if successful, error describing problem if failed
-func StoreRemoteHostMetrics(db *sql.DB, hostID string, service *parser.Service) error {
+func StoreRemoteHostMetrics(db queryer, hostID string, service *parser.Service) error {
 	// Check if this is a remote host service (type 4) or process service (type 3)
 	// Remote host services (type 4) can have ICMP and Port metrics
 	// Process services (type 3) can have Port and Unix socket metrics

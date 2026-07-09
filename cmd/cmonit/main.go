@@ -161,6 +161,9 @@ func main() {
 	configFile := flag.String("config", "",
 		"Configuration file path (TOML format, optional)")
 
+	retentionDays := flag.Int("retention-days", 30,
+		"Days of metrics/events history to keep; older rows are pruned hourly")
+
 	// Parse command-line flags
 	//
 	// flag.Parse() processes os.Args (command-line arguments)
@@ -240,6 +243,7 @@ func main() {
 		*syslogFacility = config.MergeString(cfg.Logging.Syslog, *syslogFacility, "")
 		*debugFlag = config.MergeBool(cfg.Logging.Debug, *debugFlag)
 		*daemonMode = config.MergeBool(cfg.Process.Daemon, *daemonMode)
+		*retentionDays = config.MergeInt(cfg.Storage.RetentionDays, *retentionDays, 30)
 	}
 
 	// Process collector address to inherit IP from -listen
@@ -697,6 +701,26 @@ func main() {
 			err := db.RecordAvailabilityForAllHosts(globalDB)
 			if err != nil {
 				log.Printf("[WARN] Failed to record availability for all hosts: %v", err)
+			}
+		}
+	}()
+
+	// Start retention pruning background job
+	//
+	// metrics and events are append-only tables; without pruning they grow
+	// unbounded. This runs hourly rather than on every write since it's a
+	// bulk DELETE, not something that needs to react to individual inserts.
+	go func() {
+		log.Printf("[INFO] Starting retention pruning background job (retention: %d days)", *retentionDays)
+
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+
+		for {
+			<-ticker.C
+
+			if err := db.PruneOldData(globalDB, *retentionDays); err != nil {
+				log.Printf("[WARN] Failed to prune old data: %v", err)
 			}
 		}
 	}()

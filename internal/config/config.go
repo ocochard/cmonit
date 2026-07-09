@@ -98,6 +98,10 @@ type StorageConfig struct {
 
 	// PidFile is the PID file path
 	PidFile string `toml:"pidfile"`
+
+	// RetentionDays controls how long metrics/events are kept before a
+	// background job prunes them. 0 or unset means "use the default" (30).
+	RetentionDays int `toml:"retention_days"`
 }
 
 // LoggingConfig contains logging settings.
@@ -218,4 +222,21 @@ func MergeBool(cfgValue, cliValue bool) bool {
 
 	// Otherwise use config file value
 	return cfgValue
+}
+
+// MergeInt merges integer configuration values with priority, following
+// the same CLI > config file > default precedence as MergeString.
+func MergeInt(cfgValue, cliValue, defaultValue int) int {
+	// If CLI flag was explicitly set (differs from default), use it
+	if cliValue != defaultValue {
+		return cliValue
+	}
+
+	// If config file has a non-zero value, use it
+	if cfgValue != 0 {
+		return cfgValue
+	}
+
+	// Otherwise use the CLI default
+	return cliValue
 }

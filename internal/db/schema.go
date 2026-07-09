@@ -238,7 +238,12 @@ const (
 	// host" query, which filters by metric_type only (no metric_name
 	// constraint - cpu sums 4 metric_names) and groups by host_id without a
 	// service_name constraint - idx_metrics_lookup can't serve that (host_id
-	// is its leading column, not metric_type).
+	// is its leading column, not metric_type). metric_name and value are
+	// trailing columns so the query's SUM(CASE WHEN metric_name = ...) can
+	// be answered from the index alone - without them, every metric_type =
+	// 'cpu' row still needs a table lookup just to read metric_name/value,
+	// which dominates on a multi-million-row table even though host_id and
+	// collected_at are covered.
 	//
 	// idx_metrics_type_name_host: The "latest memory percent per host" query
 	// additionally filters on metric_name = 'percent'. Without metric_name in
@@ -252,11 +257,43 @@ const (
 	CREATE INDEX IF NOT EXISTS idx_metrics_lookup
 		ON metrics(host_id, service_name, metric_type, metric_name, collected_at);
 	CREATE INDEX IF NOT EXISTS idx_metrics_type_host
-		ON metrics(metric_type, host_id, collected_at DESC);
+		ON metrics(metric_type, host_id, collected_at DESC, metric_name, value);
 	CREATE INDEX IF NOT EXISTS idx_metrics_type_name_host
 		ON metrics(metric_type, metric_name, host_id, collected_at DESC);
 	CREATE INDEX IF NOT EXISTS idx_metrics_time
 		ON metrics(collected_at);`
+
+	// createLatestMetricsTable creates a cache of each series' most recent
+	// value, upserted on every StoreMetric call.
+	//
+	// The status page only ever needs the latest cpu/memory value per host -
+	// it never reads history. Reading that from `metrics` means scanning
+	// every row for the matching metric_type to compute a per-host MAX
+	// (SQLite has no skip-scan for grouped MAX), so the query cost grows
+	// with the retention window and ingest volume, not with host count.
+	// latest_metrics has exactly one row per (host, service, metric_type,
+	// metric_name), so reads are O(hosts * services * metric names)
+	// regardless of how much history is retained.
+	// No backfill from existing metrics history on creation: computing each
+	// group's latest row up front means either a full sort of every history
+	// row (ROW_NUMBER()/PARTITION BY - measured at several minutes blocking
+	// startup on a 13M-row production table under the pure-Go SQLite driver)
+	// or as many correlated MAX(collected_at) lookups as there are groups.
+	// Instead the table just starts empty; StoreMetric populates each
+	// group's row on its next write, which happens within that host's
+	// normal poll interval (seconds) - a far smaller and self-resolving gap
+	// than blocking every future startup on the full history size.
+	createLatestMetricsTable = `
+	CREATE TABLE IF NOT EXISTS latest_metrics (
+		host_id TEXT NOT NULL,
+		service_name TEXT NOT NULL,
+		metric_type TEXT NOT NULL,
+		metric_name TEXT NOT NULL,
+		value REAL NOT NULL,
+		collected_at DATETIME NOT NULL,
+		PRIMARY KEY (host_id, service_name, metric_type, metric_name),
+		FOREIGN KEY (host_id) REFERENCES hosts(id) ON DELETE CASCADE
+	);`
 
 	// createEventsTable creates the events table
 	//
@@ -853,6 +890,14 @@ func InitDB(dbPath string) (*sql.DB, error) {
 	if err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to create metrics indexes: %w", err)
+	}
+
+	// Create latest_metrics table (cache of each series' most recent value).
+	// Left empty on creation - see createLatestMetricsTable's comment for why.
+	_, err = db.Exec(createLatestMetricsTable)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to create latest_metrics table: %w", err)
 	}
 
 	// Create events table

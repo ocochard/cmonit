@@ -249,6 +249,11 @@ func getServicesGroupedByHost() (map[string][]Service, error) {
 // getLatestSystemMetricsGroupedByHost returns each host's most recent total
 // CPU percent and memory percent, keyed by host_id.
 //
+// Reads from latest_metrics (one row per host/service/metric_type/
+// metric_name, kept current by StoreMetric) instead of scanning metrics
+// history - this makes the query cost O(hosts) instead of O(retained
+// history size).
+//
 // metric_type 'cpu'/'memory' are written exclusively by StoreSystemMetrics
 // for the type-5 system service, so grouping by host_id alone (without
 // matching service_name to hostname, as the old per-host query did) is
@@ -256,21 +261,14 @@ func getServicesGroupedByHost() (map[string][]Service, error) {
 // metric_types.
 func getLatestSystemMetricsGroupedByHost() (map[string]float64, map[string]float64, error) {
 	const cpuQuery = `
-		WITH latest_cpu AS (
-			SELECT host_id, MAX(collected_at) AS max_collected
-			FROM metrics
-			WHERE metric_type = 'cpu'
-			GROUP BY host_id
-		)
-		SELECT m.host_id,
-			SUM(CASE WHEN m.metric_name = 'user' THEN m.value ELSE 0 END) +
-			SUM(CASE WHEN m.metric_name = 'system' THEN m.value ELSE 0 END) +
-			SUM(CASE WHEN m.metric_name = 'nice' THEN m.value ELSE 0 END) +
-			SUM(CASE WHEN m.metric_name = 'wait' THEN m.value ELSE 0 END) AS total_cpu
-		FROM metrics m
-		JOIN latest_cpu lc ON m.host_id = lc.host_id AND m.collected_at = lc.max_collected
-		WHERE m.metric_type = 'cpu'
-		GROUP BY m.host_id
+		SELECT host_id,
+			SUM(CASE WHEN metric_name = 'user' THEN value ELSE 0 END) +
+			SUM(CASE WHEN metric_name = 'system' THEN value ELSE 0 END) +
+			SUM(CASE WHEN metric_name = 'nice' THEN value ELSE 0 END) +
+			SUM(CASE WHEN metric_name = 'wait' THEN value ELSE 0 END) AS total_cpu
+		FROM latest_metrics
+		WHERE metric_type = 'cpu'
+		GROUP BY host_id
 	`
 
 	cpuByHost := make(map[string]float64)
@@ -294,16 +292,9 @@ func getLatestSystemMetricsGroupedByHost() (map[string]float64, map[string]float
 	}
 
 	const memQuery = `
-		WITH latest_mem AS (
-			SELECT host_id, MAX(collected_at) AS max_collected
-			FROM metrics
-			WHERE metric_type = 'memory' AND metric_name = 'percent'
-			GROUP BY host_id
-		)
-		SELECT m.host_id, m.value
-		FROM metrics m
-		JOIN latest_mem lm ON m.host_id = lm.host_id AND m.collected_at = lm.max_collected
-		WHERE m.metric_type = 'memory' AND m.metric_name = 'percent'
+		SELECT host_id, value
+		FROM latest_metrics
+		WHERE metric_type = 'memory' AND metric_name = 'percent'
 	`
 
 	memByHost := make(map[string]float64)

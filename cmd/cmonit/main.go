@@ -713,6 +713,12 @@ func main() {
 	go func() {
 		log.Printf("[INFO] Starting retention pruning background job (retention: %d days)", *retentionDays)
 
+		// Prune once immediately so a restart doesn't leave stale data
+		// sitting around for up to an hour before the first tick.
+		if err := db.PruneOldData(globalDB, *retentionDays); err != nil {
+			log.Printf("[WARN] Failed to prune old data: %v", err)
+		}
+
 		ticker := time.NewTicker(1 * time.Hour)
 		defer ticker.Stop()
 

@@ -34,32 +34,18 @@ var queries = []struct {
 	{"hosts", `SELECT id, hostname, last_seen FROM hosts ORDER BY last_seen DESC`},
 	{"services", `SELECT host_id, name, type, status, monitor, pid, cpu_percent, memory_percent, memory_kb, collected_at FROM services ORDER BY host_id, type, name`},
 	{"cpu", `
-		WITH latest_cpu AS (
-			SELECT host_id, MAX(collected_at) AS max_collected
-			FROM metrics
-			WHERE metric_type = 'cpu'
-			GROUP BY host_id
-		)
-		SELECT m.host_id,
-			SUM(CASE WHEN m.metric_name = 'user' THEN m.value ELSE 0 END) +
-			SUM(CASE WHEN m.metric_name = 'system' THEN m.value ELSE 0 END) +
-			SUM(CASE WHEN m.metric_name = 'nice' THEN m.value ELSE 0 END) +
-			SUM(CASE WHEN m.metric_name = 'wait' THEN m.value ELSE 0 END) AS total_cpu
-		FROM metrics m
-		JOIN latest_cpu lc ON m.host_id = lc.host_id AND m.collected_at = lc.max_collected
-		WHERE m.metric_type = 'cpu'
-		GROUP BY m.host_id`},
+		SELECT host_id,
+			SUM(CASE WHEN metric_name = 'user' THEN value ELSE 0 END) +
+			SUM(CASE WHEN metric_name = 'system' THEN value ELSE 0 END) +
+			SUM(CASE WHEN metric_name = 'nice' THEN value ELSE 0 END) +
+			SUM(CASE WHEN metric_name = 'wait' THEN value ELSE 0 END) AS total_cpu
+		FROM latest_metrics
+		WHERE metric_type = 'cpu'
+		GROUP BY host_id`},
 	{"mem", `
-		WITH latest_mem AS (
-			SELECT host_id, MAX(collected_at) AS max_collected
-			FROM metrics
-			WHERE metric_type = 'memory' AND metric_name = 'percent'
-			GROUP BY host_id
-		)
-		SELECT m.host_id, m.value
-		FROM metrics m
-		JOIN latest_mem lm ON m.host_id = lm.host_id AND m.collected_at = lm.max_collected
-		WHERE m.metric_type = 'memory' AND m.metric_name = 'percent'`},
+		SELECT host_id, value
+		FROM latest_metrics
+		WHERE metric_type = 'memory' AND metric_name = 'percent'`},
 	{"events", `SELECT host_id, COUNT(*) FROM events GROUP BY host_id`},
 	{"hostgroups", `SELECT hhg.host_id, hg.name FROM host_hostgroups hhg JOIN hostgroups hg ON hhg.hostgroup_id = hg.id`},
 	{"allhostgroups", `SELECT name FROM hostgroups ORDER BY name`},

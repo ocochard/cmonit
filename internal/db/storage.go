@@ -689,6 +689,23 @@ func StoreMetric(db queryer, hostID, serviceName, metricType, metricName string,
 		return fmt.Errorf("failed to store metric: %w", err)
 	}
 
+	// Keep the latest_metrics cache current so status-page reads don't need
+	// to scan metrics history. The WHERE guard drops out-of-order writes
+	// (an older collected_at arriving after a newer one) instead of letting
+	// them clobber the cached value.
+	const upsertLatest = `
+		INSERT INTO latest_metrics (
+			host_id, service_name, metric_type, metric_name, value, collected_at
+		) VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(host_id, service_name, metric_type, metric_name) DO UPDATE SET
+			value = excluded.value,
+			collected_at = excluded.collected_at
+		WHERE excluded.collected_at >= latest_metrics.collected_at
+	`
+	if _, err := db.Exec(upsertLatest, hostID, serviceName, metricType, metricName, value, collectedAt); err != nil {
+		return fmt.Errorf("failed to update latest_metrics: %w", err)
+	}
+
 	// Success - don't log individual metrics (too verbose)
 	// We'll log summary statistics instead
 	return nil

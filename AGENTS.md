@@ -38,7 +38,7 @@ Collector and web have independent credentials and TLS settings. Config preceden
 ### Database (`internal/db`)
 
 SQLite via `modernc.org/sqlite`. The driver name is `"sqlite"`, not `"sqlite3"`. WAL mode.
-- Schema changes are additive migrations in `schema.go:MigrateSchema()`: bump `currentSchemaVersion` (currently 15) and append a `case`. Also update the fresh-install schema definition in the same file.
+- Schema changes are additive migrations in `schema.go:MigrateSchema()`: bump `currentSchemaVersion` (currently 16) and append a `case`. Also update the fresh-install schema definition in the same file.
 - `latest_metrics` is a cache of each series' newest value, upserted during ingest (`storage.go`). Status-page reads depend on it instead of scanning `metrics`. Changes to metric writes must keep it in sync.
 - `PruneOldData` enforces `retention-days` (default 30), run on startup and periodically.
 - Performance on large DBs has been a recurring problem: before changing indexes or queries, measure with `cmd/qdiag` and see `docs/troubleshooting.md`.

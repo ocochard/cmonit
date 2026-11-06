@@ -31,7 +31,7 @@ import (
 
 // currentSchemaVersion is the current database schema version.
 // Increment this when making schema changes that require migration.
-const currentSchemaVersion = 15
+const currentSchemaVersion = 16
 
 // SQL schema for the cmonit database
 //
@@ -234,32 +234,21 @@ const (
 	// idx_metrics_time: Optimizes queries like:
 	//   "Delete all metrics older than 30 days"
 	//
-	// idx_metrics_type_host: Optimizes the status-page "latest cpu value per
-	// host" query, which filters by metric_type only (no metric_name
-	// constraint - cpu sums 4 metric_names) and groups by host_id without a
-	// service_name constraint - idx_metrics_lookup can't serve that (host_id
-	// is its leading column, not metric_type). metric_name and value are
-	// trailing columns so the query's SUM(CASE WHEN metric_name = ...) can
-	// be answered from the index alone - without them, every metric_type =
-	// 'cpu' row still needs a table lookup just to read metric_name/value,
-	// which dominates on a multi-million-row table even though host_id and
-	// collected_at are covered.
+	// idx_metrics_host_service_time: Optimizes the graph query, which filters
+	// by host, service and a time window and reads the rows in time order.
+	// idx_metrics_lookup cannot use the time bound (metric_type and
+	// metric_name sit between service_name and collected_at in its key), so
+	// that query scanned every row of the service whatever the window.
 	//
-	// idx_metrics_type_name_host: The "latest memory percent per host" query
-	// additionally filters on metric_name = 'percent'. Without metric_name in
-	// the index, SQLite can use idx_metrics_type_host for the metric_type
-	// prefix but must fetch every matching row from the table to check
-	// metric_name (non-covering SEARCH), which is far slower than the
-	// covering-index case on a multi-million-row table. This index puts
-	// metric_type+metric_name as the equality prefix so the memory/percent
-	// query is a pure covering-index scan, same as the cpu query above.
+	// Latest-value reads (status page, M/Monit CPU and memory, system metrics
+	// on the host page) use latest_metrics, not indexes on this table. Two
+	// metric_type-led covering indexes used to serve them; they were 2.8 GB of
+	// a 5.5 GB database and were dropped in schema v16.
 	createMetricsIndexes = `
 	CREATE INDEX IF NOT EXISTS idx_metrics_lookup
 		ON metrics(host_id, service_name, metric_type, metric_name, collected_at);
-	CREATE INDEX IF NOT EXISTS idx_metrics_type_host
-		ON metrics(metric_type, host_id, collected_at DESC, metric_name, value);
-	CREATE INDEX IF NOT EXISTS idx_metrics_type_name_host
-		ON metrics(metric_type, metric_name, host_id, collected_at DESC);
+	CREATE INDEX IF NOT EXISTS idx_metrics_host_service_time
+		ON metrics(host_id, service_name, collected_at);
 	CREATE INDEX IF NOT EXISTS idx_metrics_time
 		ON metrics(collected_at);`
 
@@ -1524,6 +1513,26 @@ func migrateSchema(db *sql.DB, fromVersion, toVersion int) error {
 				return err
 			}
 			log.Printf("[INFO] Successfully migrated to schema version 15")
+
+		case 15:
+			// The two indexes served only the latest CPU/memory lookups, which now
+			// read latest_metrics. Dropping them freed about half of a 5.5 GB database.
+			// idx_metrics_host_service_time is created by createMetricsIndexes after
+			// this migration; on a large table that build runs at startup.
+			log.Printf("[INFO] Migrating from v15 to v16: Dropping unused metrics indexes")
+
+			for _, name := range []string{"idx_metrics_type_host", "idx_metrics_type_name_host"} {
+				if _, err := db.Exec("DROP INDEX IF EXISTS " + name); err != nil {
+					return fmt.Errorf("migration v15->v16 failed dropping %s: %w", name, err)
+				}
+			}
+
+			fromVersion = 16
+			err := setSchemaVersion(db, fromVersion)
+			if err != nil {
+				return err
+			}
+			log.Printf("[INFO] Successfully migrated to schema version 16")
 
 		default:
 			return fmt.Errorf("no migration path from version %d", fromVersion)

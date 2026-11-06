@@ -7,12 +7,14 @@ import (
 )
 
 // schema_version is append-only and the current version is its maximum.
-func rollBackVersionTo14(t *testing.T, d *sql.DB) {
+func rollBackVersionTo14(t *testing.T, d *sql.DB) { rollBackVersionTo(t, d, 14) }
+
+func rollBackVersionTo(t *testing.T, d *sql.DB, v int) {
 	t.Helper()
-	if _, err := d.Exec(`DELETE FROM schema_version WHERE version > 14`); err != nil {
+	if _, err := d.Exec(`DELETE FROM schema_version WHERE version > ?`, v); err != nil {
 		t.Fatal(err)
 	}
-	if err := setSchemaVersion(d, 14); err != nil {
+	if err := setSchemaVersion(d, v); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -68,4 +70,46 @@ func TestMigrateV14IsIdempotentWhenColumnsExist(t *testing.T) {
 		t.Fatalf("migration with existing columns failed: %v", err)
 	}
 	d.Close()
+}
+
+// v15 databases have the two metric_type-led indexes; v16 drops them and
+// adds the graph index.
+func TestMigrateV15DropsUnusedMetricsIndexes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "m.db")
+	d, err := InitDB(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		`CREATE INDEX idx_metrics_type_host ON metrics(metric_type, host_id, collected_at DESC, metric_name, value)`,
+		`CREATE INDEX idx_metrics_type_name_host ON metrics(metric_type, metric_name, host_id, collected_at DESC)`,
+		`DROP INDEX idx_metrics_host_service_time`,
+	} {
+		if _, err := d.Exec(stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+	rollBackVersionTo(t, d, 15)
+	d.Close()
+
+	d, err = InitDB(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+
+	has := func(name string) bool {
+		var n int
+		d.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?`, name).Scan(&n)
+		return n > 0
+	}
+	if has("idx_metrics_type_host") || has("idx_metrics_type_name_host") {
+		t.Fatal("old indexes still present after migration")
+	}
+	if !has("idx_metrics_host_service_time") || !has("idx_metrics_lookup") || !has("idx_metrics_time") {
+		t.Fatal("expected indexes missing after migration")
+	}
+	if v, _ := getSchemaVersion(d); v != 16 {
+		t.Fatalf("schema version = %d, want 16", v)
+	}
 }

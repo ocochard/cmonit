@@ -1016,16 +1016,18 @@ func getProgramMetrics(hostID, serviceName string) (*ProgramMetrics, error) {
 func getSystemMetricsForService(hostID, serviceName string) (*SystemMetrics, error) {
 	sm := &SystemMetrics{}
 
-	// Query all metrics at the most recent timestamp using a subquery
-	// This avoids the timestamp parsing issue with SQLite
+	// Read latest_metrics, not metrics: the MAX(collected_at) subquery scanned
+	// every row of the service (seconds on a multi-GB database). The subquery
+	// keeps the old behavior of showing only the newest set, so a metric that
+	// stopped being reported does not linger.
 	const query = `
 		SELECT metric_type, metric_name, value
-		FROM metrics
+		FROM latest_metrics
 		WHERE host_id = ? AND service_name = ?
 		  AND metric_type IN ('load', 'cpu', 'memory', 'swap')
 		  AND collected_at = (
 		    SELECT MAX(collected_at)
-		    FROM metrics
+		    FROM latest_metrics
 		    WHERE host_id = ? AND service_name = ?
 		      AND metric_type IN ('load', 'cpu', 'memory', 'swap')
 		  )

@@ -188,16 +188,15 @@ func HandleMetricsAPI(w http.ResponseWriter, r *http.Request) {
 func getMetricsForService(hostID, service string, startTime, endTime time.Time) ([]MetricSeries, error) {
 	// Query all metrics for this service in the time range
 	//
-	// ORDER BY metric_type, metric_name, collected_at:
-	// - Groups metrics of the same type together
-	// - Within each type, groups by metric name
-	// - Within each metric, orders by time (oldest first)
+	// ORDER BY collected_at lets idx_metrics_host_service_time return the rows
+	// already ordered, with no sort. Each series is built in a map below, so
+	// only the time order within a series matters.
 	const query = `
 		SELECT metric_type, metric_name, value, collected_at
 		FROM metrics
 		WHERE host_id = ? AND service_name = ?
 		  AND collected_at BETWEEN ? AND ?
-		ORDER BY metric_type, metric_name, collected_at
+		ORDER BY collected_at
 	`
 
 	// Execute query with parameters

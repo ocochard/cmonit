@@ -744,12 +744,12 @@ func buildPlatformString(osName, osRelease, machine sql.NullString) string {
 
 // getLatestSystemCPUPercent retrieves the latest system CPU percentage from metrics.
 //
-// Queries the metrics table for the most recent system_cpu percent value
+// Queries latest_metrics for the most recent system_cpu percent value
 // for the given host. Returns 0 if no data is available.
 func getLatestSystemCPUPercent(hostID string) int {
 	const query = `
 		SELECT value
-		FROM metrics
+		FROM latest_metrics
 		WHERE host_id = ? AND metric_type = 'system_cpu' AND metric_name = 'percent'
 		ORDER BY collected_at DESC
 		LIMIT 1
@@ -766,12 +766,12 @@ func getLatestSystemCPUPercent(hostID string) int {
 
 // getLatestSystemMemoryPercent retrieves the latest system memory percentage from metrics.
 //
-// Queries the metrics table for the most recent memory percent value
+// Queries latest_metrics for the most recent memory percent value
 // for the given host. Returns 0 if no data is available.
 func getLatestSystemMemoryPercent(hostID string) int {
 	const query = `
 		SELECT value
-		FROM metrics
+		FROM latest_metrics
 		WHERE host_id = ? AND metric_type = 'memory' AND metric_name = 'percent'
 		ORDER BY collected_at DESC
 		LIMIT 1

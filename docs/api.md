@@ -99,6 +99,39 @@ curl -X POST http://localhost:3000/api/host/description \
 
 ---
 
+### Alerting: /api/alerts/
+
+JSON in and out. `POST`/`PUT` require `Content-Type: application/json`. Errors: `400` invalid field, `404` unknown id, `409` duplicate name.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET, POST | `/api/alerts/channels` | List / create channels |
+| PUT, DELETE | `/api/alerts/channels/{id}` | Update / delete a channel |
+| POST | `/api/alerts/channels/{id}/test` | Send a test notification (no body) |
+| GET, POST | `/api/alerts/rules` | List / create rules |
+| PUT, DELETE | `/api/alerts/rules/{id}` | Update (omitted fields keep their value) / delete a rule |
+| GET | `/api/alerts/log?limit=N` | Newest send attempts (default 100, max 500) |
+
+Channel: `{"name", "type", "config", "enabled"}`. Types and config keys:
+- `email`: `host`, `port` (default 25), `username`, `password`, `from`, `to` (list). STARTTLS if the server offers it; implicit TLS (465) is not supported.
+- `telegram`: `bot_token`, `chat_id`
+- `slack`: `webhook_url` (incoming webhook)
+- `webhook`: `url`, optional `headers`. POSTs `{kind, subject, time, items:[{host_id, hostname, service, type, message, since}]}`. Use it for ntfy, Discord, Teams, Twilio/WhatsApp gateways.
+
+`password`, `bot_token`, `webhook_url`, `url` and header values are returned as `***`. Sending `***` back on `PUT` keeps the stored value.
+
+Rule: `{"name", "enabled", "trigger", "host_pattern", "service_pattern", "service_types", "hold_seconds", "cooldown_seconds", "notify_recovery", "channel_ids"}`.
+- `trigger`: `service_failure` (default) or `host_offline` (no data for 5 poll intervals).
+- `host_pattern`, `service_pattern`: glob (`*`, `?`) on hostname / service name; default `*`.
+- `service_types`: Monit service type numbers 0-8; empty means all.
+- `hold_seconds` (default 30): a failure is sent only after the oldest matching failure is this old. Everything failing on any host inside that window goes out as one notification; services that recover during it are never reported.
+- `cooldown_seconds`: minimum gap before the same service is notified again after a flap.
+- `notify_recovery` (default true): send one grouped message when notified failures recover.
+
+Failure times are Monit's own check timestamps. Notifications list items oldest first with offsets (`+4s`) and name the earliest in the subject (`first: postgres@db01`). This is a hint, not a root-cause diagnosis: resolution is one second at best and in practice the agents' poll interval, and agent clocks may differ.
+
+Failed sends are logged in the alert log and not retried. Services of a host that is offline are not reported while it is offline; after it returns, new failures wait an extra 2 poll intervals.
+
 ## M/Monit v2 API (`/api/2/`)
 
 All endpoints accept both `GET` and `POST`. Parameters are passed as query string or form values.

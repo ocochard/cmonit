@@ -11,11 +11,15 @@ cmd/cmonit/main.go          Entry point, two HTTP servers, daemon mode, signal h
 internal/
   config/config.go          TOML config loader with CLI override priority
   db/
-    schema.go               SQLite schema definition + incremental migrations (v1→v12)
+    schema.go               SQLite schema definition + incremental migrations (v1→v13)
     storage.go              All persistence logic (insert/update/query helpers)
   parser/
     xml.go                  Monit XML → Go structs, gzip + charset handling
     xml_test.go             Parser unit tests
+  alert/
+    engine.go               State tracking (alert_state), hold/cooldown grouping, flush loop
+    store.go                Channel/rule CRUD, secret masking
+    notifier.go             Notifier interface: email, telegram, slack, webhook
   control/
     actions.go              Remote Monit actions (start/stop/restart/monitor)
   web/
@@ -79,6 +83,9 @@ Background goroutine every 60 s: `RecordAvailabilityForAllHosts()`.
 | program_metrics       | Exit status + output per program check            |
 | remote_host_metrics   | Response times for ICMP / TCP / UDP / Unix checks |
 | host_availability     | Periodic green/yellow/red snapshots               |
+| alert_channels/rules/rule_channels | Alert media and rules (schema v13)     |
+| alert_state           | Per host/service failed/notified state for the alert engine |
+| alert_log             | Notification send attempts (pruned with retention) |
 | hostgroups            | Named groups                                      |
 | host_hostgroups       | Many-to-many hosts ↔ groups                       |
 
@@ -112,6 +119,7 @@ Migrations are additive SQL blocks in `schema.go:MigrateSchema()`. Bump `current
 | GET    | /api/availability                 | HandleAvailabilityAPI        |
 | POST   | /api/host/description             | HandleUpdateDescription      |
 | GET    | /api/hostgroups                   | HandleHostGroupsAPI          |
+| *      | /api/alerts/...                   | HandleAlertsAPI (alerts_api.go) |
 
 `health.go` contains only internal helper functions (`CalculateHostHealth`, `FormatTimeSince`, etc.) — no HTTP endpoint.
 

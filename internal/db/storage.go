@@ -520,6 +520,10 @@ func PruneOldData(db *sql.DB, retentionDays int) error {
 		return fmt.Errorf("failed to prune events: %w", err)
 	}
 
+	if _, err := db.Exec("DELETE FROM alert_log WHERE created_at < ?", cutoff); err != nil {
+		return fmt.Errorf("failed to prune alert_log: %w", err)
+	}
+
 	if debugMode {
 		metricsDeleted, _ := metricsResult.RowsAffected()
 		eventsDeleted, _ := eventsResult.RowsAffected()
@@ -991,14 +995,22 @@ func StoreHostGroups(db queryer, hostID string, groupNames []string) error {
 	return nil
 }
 
+// HostIDFor returns the host primary key for a Monit agent: its idfile ID, or
+// hostname-incarnation when Monit has no idfile.
+func HostIDFor(server *parser.Server) string {
+	if server.ID != "" {
+		return server.ID
+	}
+	return fmt.Sprintf("%s-%d", server.LocalHostname, server.Incarnation)
+}
+
 func StoreMonitStatus(db *sql.DB, status *parser.MonitStatus) error {
 	// Generate host ID (same logic as in StoreHost)
 	//
 	// We generate the ID here so we can pass it to all storage functions.
 	// If Monit provides an ID, use it. Otherwise, generate one from hostname + incarnation.
-	hostID := status.Server.ID
-	if hostID == "" {
-		hostID = fmt.Sprintf("%s-%d", status.Server.LocalHostname, status.Server.Incarnation)
+	hostID := HostIDFor(&status.Server)
+	if status.Server.ID == "" {
 		log.Printf("[INFO] Generated host ID: %s (no idfile configured in Monit)", hostID)
 	}
 

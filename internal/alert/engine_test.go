@@ -1,0 +1,309 @@
+package alert
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"path/filepath"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/ocochard/cmonit/internal/db"
+	"github.com/ocochard/cmonit/internal/parser"
+)
+
+type harness struct {
+	t     *testing.T
+	db    *sql.DB
+	eng   *Engine
+	clock time.Time
+	mu    sync.Mutex
+	sent  []Notification
+}
+
+func newHarness(t *testing.T) *harness {
+	t.Helper()
+	d, err := db.InitDB(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { d.Close() })
+
+	h := &harness{t: t, db: d, clock: time.Now()}
+	h.eng = NewEngine(d)
+	h.eng.now = func() time.Time { return h.clock }
+	h.eng.send = func(_ context.Context, _ Channel, n Notification) error {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		h.sent = append(h.sent, n)
+		return nil
+	}
+
+	if _, err := d.Exec(`INSERT INTO hosts (id, hostname, last_seen, poll_interval) VALUES ('h1', 'web01', ?, 30)`, h.clock); err != nil {
+		t.Fatal(err)
+	}
+	return h
+}
+
+func (h *harness) addRule(r Rule) {
+	h.t.Helper()
+	ch := Channel{Name: "c" + r.Name, Type: "webhook", Config: []byte(`{"url":"http://x"}`), Enabled: true}
+	if err := SaveChannel(h.db, &ch); err != nil {
+		h.t.Fatal(err)
+	}
+	r.Enabled = true
+	r.ChannelIDs = []int64{ch.ID}
+	if err := SaveRule(h.db, &r); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
+func (h *harness) advance(d time.Duration) { h.clock = h.clock.Add(d) }
+
+func (h *harness) post(failing ...string) {
+	h.t.Helper()
+	down := map[string]bool{}
+	for _, f := range failing {
+		down[f] = true
+	}
+	st := &parser.MonitStatus{Server: parser.Server{Poll: 30}}
+	for i := 0; i < 5; i++ {
+		name := fmt.Sprintf("svc%d", i)
+		s := parser.Service{Name: name, Type: 3, Monitor: 1}
+		if down[name] {
+			s.Status = 1
+		}
+		st.Services = append(st.Services, s)
+	}
+	h.eng.Observe("h1", st)
+	h.touch()
+}
+
+// touch simulates the host row update that StoreHost does on every POST.
+func (h *harness) touch() {
+	h.db.Exec(`UPDATE hosts SET last_seen = ? WHERE id = 'h1'`, h.clock)
+}
+
+func (h *harness) flush() { h.eng.Flush(context.Background()) }
+
+func (h *harness) kinds() []string {
+	var k []string
+	for _, n := range h.sent {
+		k = append(k, fmt.Sprintf("%s:%d", n.Kind, len(n.Items)))
+	}
+	return k
+}
+
+func (h *harness) expect(want ...string) {
+	h.t.Helper()
+	got := h.kinds()
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		h.t.Fatalf("notifications = %v, want %v", got, want)
+	}
+}
+
+func TestCascadeCollapsesToOneNotification(t *testing.T) {
+	h := newHarness(t)
+	h.addRule(Rule{Name: "all", HoldSeconds: 30, NotifyRecovery: true})
+
+	h.post("svc0", "svc1", "svc2", "svc3", "svc4")
+	h.flush()
+	h.expect() // still inside the hold window
+
+	h.advance(31 * time.Second)
+	h.post("svc0", "svc1", "svc2", "svc3", "svc4")
+	h.flush()
+	h.expect("failure:5")
+
+	h.advance(time.Minute)
+	h.post("svc0", "svc1", "svc2", "svc3", "svc4")
+	h.flush()
+	h.expect("failure:5") // ongoing failure is not re-sent
+}
+
+func TestFlapInsideHoldIsAbsorbed(t *testing.T) {
+	h := newHarness(t)
+	h.addRule(Rule{Name: "all", HoldSeconds: 30, NotifyRecovery: true})
+
+	h.post("svc0")
+	h.advance(10 * time.Second)
+	h.post() // recovered before the hold elapsed
+	h.advance(60 * time.Second)
+	h.post()
+	h.flush()
+	h.expect()
+}
+
+func TestRecoveryIsSentOnceAfterFailure(t *testing.T) {
+	h := newHarness(t)
+	h.addRule(Rule{Name: "all", HoldSeconds: 0, NotifyRecovery: true})
+
+	h.post("svc0", "svc1")
+	h.flush()
+	h.advance(30 * time.Second)
+	h.post("svc0") // svc1 recovers
+	h.flush()
+	h.flush()
+	h.expect("failure:2", "recovery:1")
+}
+
+func TestNoRecoveryWhenDisabled(t *testing.T) {
+	h := newHarness(t)
+	h.addRule(Rule{Name: "all", HoldSeconds: 0, NotifyRecovery: false})
+
+	h.post("svc0")
+	h.flush()
+	h.advance(30 * time.Second)
+	h.post()
+	h.flush()
+	h.expect("failure:1")
+}
+
+func TestRuleFilters(t *testing.T) {
+	h := newHarness(t)
+	h.addRule(Rule{Name: "only-svc1", HoldSeconds: 0, ServicePattern: "svc1"})
+
+	h.post("svc0", "svc1")
+	h.flush()
+	h.expect("failure:1")
+	if h.sent[0].Items[0].Service != "svc1" {
+		t.Fatalf("matched %q, want svc1", h.sent[0].Items[0].Service)
+	}
+}
+
+func TestCooldownDefersFlappingService(t *testing.T) {
+	h := newHarness(t)
+	h.addRule(Rule{Name: "all", HoldSeconds: 0, CooldownSeconds: 300})
+
+	h.post("svc0")
+	h.flush()
+	h.advance(30 * time.Second)
+	h.post()
+	h.flush()
+	h.advance(30 * time.Second)
+	h.post("svc0")
+	h.flush()
+	h.expect("failure:1") // second failure is inside the cooldown
+
+	h.advance(301 * time.Second)
+	h.post("svc0")
+	h.flush()
+	h.expect("failure:1", "failure:1") // still failing after the cooldown
+}
+
+func TestHostOfflineSuppressesServicesAndRecovers(t *testing.T) {
+	h := newHarness(t)
+	h.addRule(Rule{Name: "svc", HoldSeconds: 0, NotifyRecovery: true})
+	h.addRule(Rule{Name: "host", Trigger: TriggerHostOffline, HoldSeconds: 0, NotifyRecovery: true})
+
+	h.post("svc0") // pending, flushed below only after the host is silent
+	h.advance(10 * time.Minute)
+	h.flush()
+	h.expect("host_offline:1") // service failure is held back
+
+	// host returns with svc0 still failing: reported only after the grace period
+	h.post("svc0")
+	h.flush()
+	h.expect("host_offline:1", "host_online:1")
+
+	h.advance(2 * time.Minute)
+	h.post("svc0")
+	h.flush()
+	h.expect("host_offline:1", "host_online:1", "failure:1")
+}
+
+func TestCascadeAcrossHostsIsOneNotification(t *testing.T) {
+	h := newHarness(t)
+	h.addRule(Rule{Name: "all", HoldSeconds: 30})
+	if _, err := h.db.Exec(`INSERT INTO hosts (id, hostname, last_seen, poll_interval) VALUES ('h2', 'db01', ?, 30)`, h.clock); err != nil {
+		t.Fatal(err)
+	}
+
+	h.post("svc0") // web01: site down
+	h.eng.Observe("h2", &parser.MonitStatus{Server: parser.Server{Poll: 30}, Services: []parser.Service{{Name: "postgres", Type: 3, Monitor: 1, Status: 1}}})
+	h.advance(31 * time.Second)
+	h.flush()
+	h.expect("failure:2")
+	if got := h.sent[0].hostCount(); got != 2 {
+		t.Fatalf("hosts in notification = %d, want 2", got)
+	}
+}
+
+func TestNotificationOrdersByMonitCheckTime(t *testing.T) {
+	h := newHarness(t)
+	h.addRule(Rule{Name: "all", HoldSeconds: 30})
+	if _, err := h.db.Exec(`INSERT INTO hosts (id, hostname, last_seen, poll_interval) VALUES ('h2', 'db01', ?, 30)`, h.clock); err != nil {
+		t.Fatal(err)
+	}
+	base := h.clock.Unix()
+
+	// web01 is observed first but its check ran 10s after db01's
+	h.eng.Observe("h1", &parser.MonitStatus{Server: parser.Server{Poll: 30}, Services: []parser.Service{
+		{Name: "site", Type: 3, Monitor: 1, Status: 1, CollectedSec: base - 5}}})
+	h.eng.Observe("h2", &parser.MonitStatus{Server: parser.Server{Poll: 30}, Services: []parser.Service{
+		{Name: "postgres", Type: 3, Monitor: 1, Status: 1, CollectedSec: base - 15}}})
+	h.advance(31 * time.Second)
+	h.flush()
+
+	h.expect("failure:2")
+	n := h.sent[0]
+	if got := n.chronological()[0].Service; got != "postgres" {
+		t.Fatalf("first item = %q, want postgres", got)
+	}
+	want := "[cmonit] 2 services failing on 2 host(s) (first: postgres@db01)"
+	if n.Subject() != want {
+		t.Fatalf("subject = %q, want %q", n.Subject(), want)
+	}
+}
+
+func TestRemovedServiceClearsState(t *testing.T) {
+	h := newHarness(t)
+	h.addRule(Rule{Name: "all", HoldSeconds: 0})
+
+	h.post("svc0")
+	h.eng.Observe("h1", &parser.MonitStatus{Server: parser.Server{Poll: 30}}) // agent no longer reports svc0
+	var n int
+	h.db.QueryRow(`SELECT COUNT(*) FROM alert_state WHERE service_name = 'svc0'`).Scan(&n)
+	if n != 0 {
+		t.Fatalf("alert_state rows for removed service = %d, want 0", n)
+	}
+}
+
+func TestGlobMatch(t *testing.T) {
+	cases := []struct {
+		pattern, s string
+		want       bool
+	}{
+		{"*", "anything", true},
+		{"web*", "web01", true},
+		{"web*", "db01", false},
+		{"/var/*", "/var/log", true},
+		{"a?c", "abc", true},
+		{"a.c", "abc", false},
+	}
+	for _, c := range cases {
+		if got := globMatch(c.pattern, c.s); got != c.want {
+			t.Errorf("globMatch(%q, %q) = %v, want %v", c.pattern, c.s, got, c.want)
+		}
+	}
+}
+
+func TestChannelSecretsMaskedAndPreserved(t *testing.T) {
+	h := newHarness(t)
+	ch := Channel{Name: "tg", Type: "telegram", Config: []byte(`{"bot_token":"SECRET","chat_id":"1"}`), Enabled: true}
+	if err := SaveChannel(h.db, &ch); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(MaskConfig(ch.Config)); got != `{"bot_token":"***","chat_id":"1"}` {
+		t.Fatalf("masked = %s", got)
+	}
+	upd := Channel{ID: ch.ID, Name: "tg", Type: "telegram", Config: []byte(`{"bot_token":"***","chat_id":"2"}`), Enabled: true}
+	if err := SaveChannel(h.db, &upd); err != nil {
+		t.Fatal(err)
+	}
+	stored, _ := GetChannel(h.db, ch.ID)
+	if string(stored.Config) != `{"bot_token":"SECRET","chat_id":"2"}` {
+		t.Fatalf("stored = %s", stored.Config)
+	}
+}

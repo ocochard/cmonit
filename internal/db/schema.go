@@ -31,7 +31,7 @@ import (
 
 // currentSchemaVersion is the current database schema version.
 // Increment this when making schema changes that require migration.
-const currentSchemaVersion = 12
+const currentSchemaVersion = 13
 
 // SQL schema for the cmonit database
 //
@@ -340,6 +340,66 @@ const (
 		ON events(created_at DESC);
 	CREATE INDEX IF NOT EXISTS idx_events_host
 		ON events(host_id, created_at DESC);`
+
+	// createAlertTables creates the alerting tables.
+	//
+	// alert_state is the engine's own failed/ok tracking per (host, service); it is
+	// independent of services.status so the engine can survive restarts without
+	// re-notifying. service_name '' is the host-level (offline) row. Times are unix
+	// seconds. Rows are kept after recovery so last_notified can enforce cooldown.
+	createAlertTables = `
+	CREATE TABLE IF NOT EXISTS alert_channels (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL UNIQUE,
+		type TEXT NOT NULL,
+		config TEXT NOT NULL DEFAULT '{}',
+		enabled INTEGER NOT NULL DEFAULT 1,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+	CREATE TABLE IF NOT EXISTS alert_rules (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL UNIQUE,
+		enabled INTEGER NOT NULL DEFAULT 1,
+		trigger TEXT NOT NULL DEFAULT 'service_failure' CHECK (trigger IN ('service_failure', 'host_offline')),
+		host_pattern TEXT NOT NULL DEFAULT '*',
+		service_pattern TEXT NOT NULL DEFAULT '*',
+		service_types TEXT NOT NULL DEFAULT '',
+		hold_seconds INTEGER NOT NULL DEFAULT 30 CHECK (hold_seconds >= 0),
+		cooldown_seconds INTEGER NOT NULL DEFAULT 0 CHECK (cooldown_seconds >= 0),
+		notify_recovery INTEGER NOT NULL DEFAULT 1,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+	CREATE TABLE IF NOT EXISTS alert_rule_channels (
+		rule_id INTEGER NOT NULL,
+		channel_id INTEGER NOT NULL,
+		PRIMARY KEY (rule_id, channel_id),
+		FOREIGN KEY (rule_id) REFERENCES alert_rules(id) ON DELETE CASCADE,
+		FOREIGN KEY (channel_id) REFERENCES alert_channels(id) ON DELETE CASCADE
+	);
+	CREATE TABLE IF NOT EXISTS alert_state (
+		host_id TEXT NOT NULL,
+		service_name TEXT NOT NULL,
+		service_type INTEGER NOT NULL DEFAULT 0,
+		failed INTEGER NOT NULL DEFAULT 0,
+		since INTEGER NOT NULL DEFAULT 0,
+		notified INTEGER NOT NULL DEFAULT 0,
+		last_notified INTEGER NOT NULL DEFAULT 0,
+		message TEXT NOT NULL DEFAULT '',
+		PRIMARY KEY (host_id, service_name),
+		FOREIGN KEY (host_id) REFERENCES hosts(id) ON DELETE CASCADE
+	);
+	CREATE TABLE IF NOT EXISTS alert_log (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		rule_id INTEGER,
+		channel_id INTEGER,
+		host_id TEXT NOT NULL,
+		kind TEXT NOT NULL,
+		subject TEXT NOT NULL,
+		status TEXT NOT NULL,
+		error TEXT NOT NULL DEFAULT ''
+	);
+	CREATE INDEX IF NOT EXISTS idx_alert_log_time ON alert_log(created_at DESC);`
 
 	// createFilesystemMetricsTable creates the filesystem_metrics table
 	//
@@ -1019,6 +1079,12 @@ func InitDB(dbPath string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to create host_hostgroups indexes: %w", err)
 	}
 
+	_, err = db.Exec(createAlertTables)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to create alert tables: %w", err)
+	}
+
 	log.Printf("[INFO] Database schema created successfully")
 
 	// Return the database connection
@@ -1376,6 +1442,21 @@ func migrateSchema(db *sql.DB, fromVersion, toVersion int) error {
 				return err
 			}
 			log.Printf("[INFO] Successfully migrated to schema version 12")
+
+		case 12:
+			log.Printf("[INFO] Migrating from v12 to v13: Adding alerting tables")
+
+			_, err := db.Exec(createAlertTables)
+			if err != nil {
+				return fmt.Errorf("migration v12->v13 failed creating alert tables: %w", err)
+			}
+
+			fromVersion = 13
+			err = setSchemaVersion(db, fromVersion)
+			if err != nil {
+				return err
+			}
+			log.Printf("[INFO] Successfully migrated to schema version 13")
 
 		default:
 			return fmt.Errorf("no migration path from version %d", fromVersion)

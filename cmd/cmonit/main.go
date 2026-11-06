@@ -18,6 +18,7 @@ import (
 	// These are packages built into Go - no need to install separately
 
 	"compress/gzip"  // Gzip compression/decompression
+	"context"        // Alert engine lifetime
 	"database/sql"   // SQL database interface
 	"flag"           // Command-line flag parsing
 	"fmt"            // Formatted I/O - like printf() in C
@@ -38,6 +39,7 @@ import (
 
 	// Internal packages (our code)
 	// These are relative to the module path (github.com/ocochard/cmonit)
+	"github.com/ocochard/cmonit/internal/alert"  // Alert rules and notifications
 	"github.com/ocochard/cmonit/internal/config" // Configuration file support
 	"github.com/ocochard/cmonit/internal/db"     // Database operations
 	"github.com/ocochard/cmonit/internal/parser" // XML parser
@@ -56,6 +58,9 @@ import (
 //
 // Later we'll refactor to use dependency injection for better testability.
 var globalDB *sql.DB
+
+// alertEngine evaluates alert rules; nil until the database is open.
+var alertEngine *alert.Engine
 
 // debugEnabled controls whether DEBUG log messages are output.
 //
@@ -459,6 +464,10 @@ func main() {
 	// web.SetDB() stores the database connection for use by web handlers
 	web.SetDB(database)
 
+	alertEngine = alert.NewEngine(database)
+	web.SetAlertEngine(alertEngine)
+	go alertEngine.Run(context.Background())
+
 	// Set the application version for display in templates
 	web.SetVersion(version)
 
@@ -531,6 +540,9 @@ func main() {
 	// /api/hostgroups returns a list of all hostgroups with their member hosts
 	// Used to display and filter hosts by group
 	webMux.HandleFunc("/api/hostgroups", web.HandleHostGroupsAPI)
+
+	// /api/alerts/ manages alert channels and rules and exposes the alert log
+	webMux.HandleFunc("/api/alerts/", web.HandleAlertsAPI)
 
 	// Static files (logo, favicon, etc.)
 	// Serves embedded static assets from internal/web/static/
@@ -1077,6 +1089,9 @@ func handleCollector(w http.ResponseWriter, r *http.Request) {
 		// We don't want Monit to think we're down and stop sending data
 		log.Printf("[ERROR] Failed to store status: %v", err)
 		// Still return 200 OK (see comment below)
+	} else if alertEngine != nil {
+		// Only after a successful store: alert_state references the hosts row
+		alertEngine.Observe(db.HostIDFor(&status.Server), status)
 	}
 
 	// Set response headers

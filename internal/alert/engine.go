@@ -46,11 +46,25 @@ type Engine struct {
 	mu   sync.Mutex
 	now  func() time.Time
 	send Sender
+
+	// One-shot "changed" events (timestamp, size, content match, ...). They
+	// last one cycle, so they are sent as they are seen, without hold or
+	// recovery, and only on the cycle they first appear. Kept in memory: a
+	// restart loses at most events from the last few seconds.
+	prevChanged map[string]map[string]map[int]bool // host -> service -> event ids
+	oneShots    []oneShot
 }
+
+type oneShot struct {
+	row stateRow
+}
+
+// maxPendingEvents bounds memory if flushing stalls.
+const maxPendingEvents = 1000
 
 // NewEngine returns an Engine that sends through the built-in notifiers.
 func NewEngine(db *sql.DB) *Engine {
-	return &Engine{db: db, now: time.Now, send: defaultSender}
+	return &Engine{db: db, now: time.Now, send: defaultSender, prevChanged: map[string]map[string]map[int]bool{}}
 }
 
 func defaultSender(ctx context.Context, ch Channel, n Notification) error {
@@ -145,14 +159,16 @@ func (e *Engine) observe(hostID string, st *parser.MonitStatus) error {
 	}
 
 	seen := make(map[string]bool, len(st.Services))
+	changedNow := map[string]map[int]bool{}
 	for i := range st.Services {
 		svc := &st.Services[i]
 		seen[svc.Name] = true
+		e.recordChanged(hostID, st.Server.LocalHostname, svc, now, changedNow)
 
 		if svc.Monitor == 2 { // initializing: state unknown, keep what we have
 			continue
 		}
-		failed := svc.Monitor == 1 && svc.Status != 0
+		failed := isFailing(svc)
 		prev := cur[svc.Name]
 
 		switch {
@@ -197,6 +213,8 @@ func (e *Engine) observe(hostID string, st *parser.MonitStatus) error {
 		}
 	}
 
+	e.prevChanged[hostID] = changedNow
+
 	// Services removed from the agent's configuration must not stay failed forever.
 	for name := range cur {
 		if name != "" && !seen[name] {
@@ -207,6 +225,31 @@ func (e *Engine) observe(hostID string, st *parser.MonitStatus) error {
 	}
 
 	return tx.Commit()
+}
+
+// recordChanged queues a one-shot for each changed event that was not already
+// changed in the previous POST of the same host. Callers hold e.mu.
+func (e *Engine) recordChanged(hostID, hostname string, svc *parser.Service, now int64, changedNow map[string]map[int]bool) {
+	if svc.Monitor != 1 {
+		return
+	}
+	ids := changedIDs(svc)
+	if len(ids) == 0 {
+		return
+	}
+	cur := map[int]bool{}
+	prev := e.prevChanged[hostID][svc.Name]
+	for _, id := range ids {
+		cur[id] = true
+		if prev[id] || len(e.oneShots) >= maxPendingEvents {
+			continue
+		}
+		e.oneShots = append(e.oneShots, oneShot{row: stateRow{
+			HostID: hostID, Hostname: hostname, Service: svc.Name, Type: svc.Type,
+			Message: eventText(id, true), Since: now,
+		}})
+	}
+	changedNow[svc.Name] = cur
 }
 
 // Flush marks silent hosts offline, then evaluates every enabled rule and
@@ -231,6 +274,7 @@ func (e *Engine) flush(ctx context.Context) error {
 		return err
 	}
 	if len(rules) == 0 {
+		e.takeOneShots() // nothing can match: do not let them pile up
 		return nil
 	}
 	rows, err := e.loadStates()
@@ -242,6 +286,7 @@ func (e *Engine) flush(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	e.flushEvents(ctx, now, rules, silences)
 	if len(silences) > 0 {
 		rows = e.applySilences(silences, rows)
 	}
@@ -290,14 +335,7 @@ func (e *Engine) applySilences(silences []Silence, rows []stateRow) []stateRow {
 
 	var kept []stateRow
 	for _, r := range rows {
-		silenced := false
-		for _, s := range silences {
-			if s.matches(r) {
-				silenced = true
-				break
-			}
-		}
-		if !silenced {
+		if !isSilenced(silences, r) {
 			kept = append(kept, r)
 			continue
 		}
@@ -309,6 +347,46 @@ func (e *Engine) applySilences(silences []Silence, rows []stateRow) []stateRow {
 		}
 	}
 	return kept
+}
+
+func isSilenced(silences []Silence, r stateRow) bool {
+	for _, s := range silences {
+		if s.matches(r) {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *Engine) takeOneShots() []oneShot {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	pending := e.oneShots
+	e.oneShots = nil
+	return pending
+}
+
+// flushEvents sends the queued one-shot events to every service_failure rule
+// that matches them, unless silenced. One notification per rule.
+func (e *Engine) flushEvents(ctx context.Context, now time.Time, rules []Rule, silences []Silence) {
+	pending := e.takeOneShots()
+	if len(pending) == 0 {
+		return
+	}
+	for _, rule := range rules {
+		if rule.Trigger != TriggerServiceFailure {
+			continue
+		}
+		var rows []stateRow
+		for _, p := range pending {
+			if !isSilenced(silences, p.row) && rule.matches(p.row) {
+				rows = append(rows, p.row)
+			}
+		}
+		if len(rows) > 0 {
+			e.dispatch(ctx, now, rule, KindEvent, rows)
+		}
+	}
 }
 
 func (e *Engine) evalRule(ctx context.Context, now time.Time, rule Rule, rows []stateRow,

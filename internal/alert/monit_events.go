@@ -1,0 +1,83 @@
+package alert
+
+// Code generated from monit src/event.c (Event_Table) and src/event.h
+// (Event_Type); DO NOT EDIT by hand. Indexes are Monit event ids as sent in
+// <errors><event id="..."> and are stable by Monit's protocol contract.
+
+// monitEvent describes one Monit event type.
+type monitEvent struct {
+	Name    string // short test name, e.g. "memory"
+	Failed  string // message when the test is in the failed state
+	Changed string // message when the test reports a change
+}
+
+var monitEvents = [...]monitEvent{
+	0:  {"null", "No Event", "No Event"},
+	1:  {"action", "Action done", "Action done"},
+	2:  {"checksum", "Checksum failed", "Checksum changed"},
+	3:  {"connection", "Connection failed", "Connection changed"},
+	4:  {"content", "Content failed", "Content match"},
+	5:  {"data", "Data access error", "Data access changed"},
+	6:  {"exec", "Execution failed", "Execution changed"},
+	7:  {"exist", "Does exist", "Existence changed"},
+	8:  {"fsflags", "Filesystem flags failed", "Filesystem flags changed"},
+	9:  {"gid", "GID failed", "GID changed"},
+	10: {"heartbeat", "Heartbeat failed", "Heartbeat changed"},
+	11: {"icmp", "ICMP failed", "ICMP changed"},
+	12: {"instance", "Monit instance failed", "Monit instance changed"},
+	13: {"invalid", "Invalid type", "Type changed"},
+	14: {"nonexist", "Does not exist", "Existence changed"},
+	15: {"permission", "Permission failed", "Permission changed"},
+	16: {"pid", "PID failed", "PID changed"},
+	17: {"ppid", "PPID failed", "PPID changed"},
+	18: {"size", "Size failed", "Size changed"},
+	19: {"timeout", "Timeout", "Timeout changed"},
+	20: {"uid", "UID failed", "UID changed"},
+	21: {"uptime", "Uptime failed", "Uptime changed"},
+	22: {"bytein", "Download bytes exceeded", "Download bytes changed"},
+	23: {"byteout", "Upload bytes exceeded", "Upload bytes changed"},
+	24: {"packetin", "Download packets exceeded", "Download packets changed"},
+	25: {"packetout", "Upload packets exceeded", "Upload packets changed"},
+	26: {"cpu", "CPU usage matched limit", "CPU usage changed"},
+	27: {"totalcpu", "Total CPU usage matched limit", "Total CPU usage changed"},
+	28: {"memory", "Memory usage matched limit", "Memory usage changed"},
+	29: {"totalmemory", "Total memory usage matched limit", "Total memory usage changed"},
+	30: {"swap", "Swap usage matched limit", "Swap usage changed"},
+	31: {"loadavg1m", "Load average (1min) matched limit", "Load average (1min) changed"},
+	32: {"loadavg5m", "Load average (5min) matched limit", "Load average (5min) changed"},
+	33: {"loadavg15m", "Load average (15min) matched limit", "Load average (15min) changed"},
+	34: {"threads", "Threads count matched limit", "Threads count changed"},
+	35: {"children", "Children count matched limit", "Children count changed"},
+	36: {"filedescriptors", "Filedescriptors usage matched limit", "Filedescriptors usage changed"},
+	37: {"totalfiledescriptors", "Total filedescriptors usage matched limit", "Total filedescriptors usage changed"},
+	38: {"readbytes", "Read rate matched limit", "Read rate changed"},
+	39: {"readoperations", "Read operations rate matched limit", "Read operations rate changed"},
+	40: {"writebytes", "Write rate matched limit", "Write rate changed"},
+	41: {"writeoperations", "Write operations rate matched limit", "Write operations rate changed"},
+	42: {"servicetime", "Service time matched limit", "Service time changed"},
+	43: {"space", "Space usage matched limit", "Space usage changed"},
+	44: {"inode", "Inode usage matched limit", "Inode usage changed"},
+	45: {"hardlink", "Hardlink failed", "Hardlink changed"},
+	46: {"pagein", "Swap pagein matched limit", "Swap pagein changed"},
+	47: {"pageout", "Swap pageout matched limit", "Swap pageout changed"},
+	48: {"timestamp", "Timestamp failed", "Timestamp changed"},
+	49: {"atime", "Access timestamp failed", "Access timestamp changed"},
+	50: {"ctime", "Change timestamp failed", "Change timestamp changed"},
+	51: {"mtime", "Modify timestamp failed", "Modify timestamp changed"},
+	52: {"certificate", "Certificate validity failed", "Certificate changed"},
+	53: {"link", "Link down", "Link changed"},
+	54: {"linkerrorsin", "Download errors detected", "Download errors changed"},
+	55: {"linkerrorsout", "Upload errors detected", "Upload errors changed"},
+	56: {"responsetime", "Response time failed", "Response time changed"},
+	57: {"linkspeed", "Link speed failed", "Link speed changed"},
+	58: {"linkduplex", "Link duplex failed", "Link duplex changed"},
+	59: {"saturation", "Saturation exceeded", "Saturation changed"},
+	60: {"saturationin", "Download saturation exceeded", "Download saturation changed"},
+	61: {"saturationout", "Upload saturation exceeded", "Upload saturation changed"},
+	62: {"euid", "EUID failed", "EUID changed"},
+	63: {"programoutput", "Program output failed", "Program output match"},
+	64: {"status", "Status failed", "Status changed"},
+	65: {"spawn", "Program start failed", "Program start changed"},
+	66: {"zombie", "Process is a zombie", "Zombie state changed"},
+	67: {"securityattribute", "Security attribute failed", "Security attribute changed"},
+}

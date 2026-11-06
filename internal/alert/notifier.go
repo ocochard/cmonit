@@ -25,6 +25,7 @@ const (
 	KindRecovery    = "recovery"
 	KindHostOffline = "host_offline"
 	KindHostOnline  = "host_online"
+	KindEvent       = "event"
 )
 
 // Item is one service (or, for host_offline, the host itself) inside a Notification.
@@ -75,6 +76,12 @@ func (n Notification) Subject() string {
 			return fmt.Sprintf("[cmonit] %s is back online", n.firstHostname())
 		}
 		return fmt.Sprintf("[cmonit] %d hosts are back online", hosts)
+	}
+	if n.Kind == KindEvent {
+		if hosts == 1 {
+			return fmt.Sprintf("[cmonit] %s: %d event(s)", n.firstHostname(), len(n.Items))
+		}
+		return fmt.Sprintf("[cmonit] %d events on %d host(s)", len(n.Items), hosts)
 	}
 	verb := "failing"
 	if n.Kind == KindRecovery {
@@ -382,8 +389,11 @@ type ntfyConfig struct {
 // otherwise username/password as Basic auth; both are optional.
 func (c *ntfyConfig) Send(ctx context.Context, n Notification) error {
 	priority, tags := "high", "warning"
-	if n.Kind == KindRecovery || n.Kind == KindHostOnline {
+	switch n.Kind {
+	case KindRecovery, KindHostOnline:
 		priority, tags = "default", "white_check_mark"
+	case KindEvent:
+		priority, tags = "default", "information_source"
 	}
 	headers := map[string]string{
 		"Title":    mime.BEncoding.Encode("UTF-8", n.Subject()),

@@ -279,6 +279,10 @@ type Service struct {
 	// >0 = action number (restart, stop, etc.)
 	PendingAction int `xml:"pendingaction"`
 
+	// Events lists the per-test event types that are failed or changed.
+	// StatusHint marks the legacy status bits that are only "changed".
+	Events []ServiceEvent `xml:"-"`
+
 	// System contains system-level metrics (CPU, memory, load, swap)
 	// Only present when Type == 5 (system service)
 	// xml:",omitempty" means: if this is nil/empty, don't include it in output
@@ -884,6 +888,14 @@ func (s *Service) StatusMessage() string {
 // but different service types (file, filesystem, process) use the same
 // field names for different purposes. This proxy captures all flat fields,
 // then ToService() converts them to the correct nested structure based on Type.
+// ServiceEvent is one entry of a service's <errors> list: a Monit event type
+// that is not in the succeeded state. State: 1 failed, 2 changed.
+// Present only when the agent sends <errors> (Monit 6.1 and later).
+type ServiceEvent struct {
+	ID    int `xml:"id,attr"`
+	State int `xml:"state,attr"`
+}
+
 type ServiceXML struct {
 	// Common fields (all service types)
 	Type          int    `xml:"type"`          // Element: <type>5</type>
@@ -896,6 +908,10 @@ type ServiceXML struct {
 	MonitorMode   int    `xml:"monitormode"`
 	OnReboot      int    `xml:"onreboot"`
 	PendingAction int    `xml:"pendingaction"`
+
+	Errors struct {
+		Events []ServiceEvent `xml:"event"`
+	} `xml:"errors"`
 
 	// Flat fields used by file (type 2), filesystem (type 0), and process (type 3)
 	// These conflict - same XML tags used for different purposes
@@ -953,6 +969,7 @@ func (sx *ServiceXML) ToService() Service {
 		MonitorMode:   sx.MonitorMode,
 		OnReboot:      sx.OnReboot,
 		PendingAction: sx.PendingAction,
+		Events:        sx.Errors.Events,
 		System:        sx.System,
 		Program:       sx.Program,
 		Link:          sx.Link,

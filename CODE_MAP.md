@@ -19,6 +19,8 @@ internal/
   alert/
     engine.go               State tracking (alert_state), hold/cooldown grouping, flush loop
     store.go                Channel/rule CRUD, secret masking
+    describe.go             Failure/changed detection and messages from <errors> and the legacy status bits
+    monit_events.go         Generated from monit event.c: event id -> description
     notifier.go             Notifier interface: email, telegram, slack, discord, ntfy, webhook
   control/
     actions.go              Remote Monit actions (start/stop/restart/monitor)

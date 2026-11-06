@@ -426,3 +426,157 @@ func TestSilenceRejectsNegativeDuration(t *testing.T) {
 		t.Fatalf("err = %v, want InvalidError", err)
 	}
 }
+
+func (h *harness) postSvc(svcs ...parser.Service) {
+	h.t.Helper()
+	h.eng.Observe("h1", &parser.MonitStatus{Server: parser.Server{Poll: 30, LocalHostname: "web01"}, Services: svcs})
+	h.touch()
+}
+
+func changedSvc(name string, ids ...int) parser.Service {
+	s := parser.Service{Name: name, Type: 2, Monitor: 1, Status: 0x8, StatusHint: 0x8}
+	for _, id := range ids {
+		s.Events = append(s.Events, parser.ServiceEvent{ID: id, State: stateChanged})
+	}
+	return s
+}
+
+func TestChangedOnlyServiceIsNotFailing(t *testing.T) {
+	h := newHarness(t)
+	h.addRule(Rule{Name: "all", HoldSeconds: 0})
+
+	h.postSvc(changedSvc("conf", 48)) // timestamp changed
+	h.advance(time.Minute)
+	h.postSvc(changedSvc("conf", 48))
+	h.flush()
+
+	var failed int
+	h.db.QueryRow(`SELECT COUNT(*) FROM alert_state WHERE failed = 1`).Scan(&failed)
+	if failed != 0 {
+		t.Fatalf("failed state rows = %d, want 0", failed)
+	}
+	for _, n := range h.sent {
+		if n.Kind != KindEvent {
+			t.Fatalf("got %s notification for a changed-only service", n.Kind)
+		}
+	}
+}
+
+func TestChangedEventNotifiesOnceOnFirstCycle(t *testing.T) {
+	h := newHarness(t)
+	h.addRule(Rule{Name: "all", HoldSeconds: 30})
+
+	h.postSvc(changedSvc("conf", 48))
+	h.flush()
+	h.expect("event:1") // no hold for one-shot events
+	if got := h.sent[0].Items[0].Message; got != monitEvents[48].Changed {
+		t.Fatalf("message = %q, want %q", got, monitEvents[48].Changed)
+	}
+
+	h.advance(30 * time.Second)
+	h.postSvc(changedSvc("conf", 48)) // still changed the next cycle: same occurrence
+	h.flush()
+	h.expect("event:1")
+
+	h.advance(30 * time.Second)
+	h.postSvc(parser.Service{Name: "conf", Type: 2, Monitor: 1}) // cleared
+	h.advance(30 * time.Second)
+	h.postSvc(changedSvc("conf", 48)) // new occurrence
+	h.flush()
+	h.expect("event:1", "event:1")
+}
+
+func TestChangedEventHonorsSilenceAndRuleFilter(t *testing.T) {
+	h := newHarness(t)
+	h.addRule(Rule{Name: "other", HoldSeconds: 0, ServicePattern: "other"})
+	h.postSvc(changedSvc("conf", 48))
+	h.flush()
+	h.expect() // rule filter
+
+	h2 := newHarness(t)
+	h2.addRule(Rule{Name: "all", HoldSeconds: 0})
+	h2.silence("web01", "*", time.Hour)
+	h2.postSvc(changedSvc("conf", 48))
+	h2.flush()
+	h2.expect() // silenced
+}
+
+func TestEventsDropWhenNoRules(t *testing.T) {
+	h := newHarness(t)
+	h.postSvc(changedSvc("conf", 48))
+	h.flush()
+	if n := len(h.eng.oneShots); n != 0 {
+		t.Fatalf("pending one-shots = %d, want 0", n)
+	}
+}
+
+func TestFailureMessageNamesTheFailedTest(t *testing.T) {
+	h := newHarness(t)
+	h.addRule(Rule{Name: "all", HoldSeconds: 0})
+
+	// legacy status says "resource" for memory, cpu, load...; <errors> says which
+	h.postSvc(parser.Service{Name: "app", Type: 3, Monitor: 1, Status: 0x2,
+		Events: []parser.ServiceEvent{{ID: 28, State: stateFailed}}})
+	h.flush()
+	h.expect("failure:1")
+	if got := h.sent[0].Items[0].Message; got != monitEvents[28].Failed {
+		t.Fatalf("message = %q, want %q", got, monitEvents[28].Failed)
+	}
+}
+
+func TestFailureMixedWithChangedUsesOnlyFailed(t *testing.T) {
+	svc := parser.Service{Monitor: 1, Status: 0x8 | 0x200, StatusHint: 0x8,
+		Events: []parser.ServiceEvent{{ID: 48, State: stateChanged}, {ID: 14, State: stateFailed}}}
+	if !isFailing(&svc) {
+		t.Fatal("service with a failed event must be failing")
+	}
+	if got := describeFailure(&svc); got != monitEvents[14].Failed {
+		t.Fatalf("message = %q, want %q", got, monitEvents[14].Failed)
+	}
+}
+
+func TestLegacyAgentWithoutErrorsList(t *testing.T) {
+	// no <errors>: fall back to the bitmask, minus the bits status_hint marks as changed
+	svc := parser.Service{Monitor: 1, Status: 0x8 | 0x200, StatusHint: 0x8}
+	if !isFailing(&svc) {
+		t.Fatal("non-hint bit must count as failing")
+	}
+	if got := describeFailure(&svc); got != "does not exist" {
+		t.Fatalf("message = %q", got)
+	}
+	onlyChanged := parser.Service{Monitor: 1, Status: 0x8, StatusHint: 0x8}
+	if isFailing(&onlyChanged) {
+		t.Fatal("hint-only status must not count as failing")
+	}
+	unmonitored := parser.Service{Monitor: 0, Status: 0x200}
+	if isFailing(&unmonitored) {
+		t.Fatal("unmonitored service must not count as failing")
+	}
+}
+
+func TestLegacyAgentChangedEventFromHintBits(t *testing.T) {
+	h := newHarness(t)
+	h.addRule(Rule{Name: "all", HoldSeconds: 30})
+
+	// Monit 6.0: no <errors>, status_hint marks the "changed" class bits
+	legacy := parser.Service{Name: "conf", Type: 2, Monitor: 1, Status: 0x8 | 0x8000, StatusHint: 0x8 | 0x8000}
+	h.postSvc(legacy)
+	h.flush()
+	h.expect("event:2")
+	msgs := []string{h.sent[0].Items[0].Message, h.sent[0].Items[1].Message}
+	if !(contains(msgs, "timestamp changed") && contains(msgs, "content match")) {
+		t.Fatalf("messages = %v", msgs)
+	}
+	if isFailing(&legacy) {
+		t.Fatal("hint-only status must not be a failure")
+	}
+}
+
+func contains(list []string, s string) bool {
+	for _, x := range list {
+		if x == s {
+			return true
+		}
+	}
+	return false
+}

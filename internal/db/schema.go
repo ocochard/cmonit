@@ -31,7 +31,7 @@ import (
 
 // currentSchemaVersion is the current database schema version.
 // Increment this when making schema changes that require migration.
-const currentSchemaVersion = 13
+const currentSchemaVersion = 14
 
 // SQL schema for the cmonit database
 //
@@ -400,6 +400,20 @@ const (
 		error TEXT NOT NULL DEFAULT ''
 	);
 	CREATE INDEX IF NOT EXISTS idx_alert_log_time ON alert_log(created_at DESC);`
+
+	// createAlertSilencesTable creates the alert_silences table.
+	//
+	// A silence suppresses notifications for failures matching the host and
+	// service globs until expires_at (unix seconds, 0 = until removed).
+	createAlertSilencesTable = `
+	CREATE TABLE IF NOT EXISTS alert_silences (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		host_pattern TEXT NOT NULL DEFAULT '*',
+		service_pattern TEXT NOT NULL DEFAULT '*',
+		expires_at INTEGER NOT NULL DEFAULT 0,
+		reason TEXT NOT NULL DEFAULT '',
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);`
 
 	// createFilesystemMetricsTable creates the filesystem_metrics table
 	//
@@ -1085,6 +1099,12 @@ func InitDB(dbPath string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to create alert tables: %w", err)
 	}
 
+	_, err = db.Exec(createAlertSilencesTable)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to create alert_silences table: %w", err)
+	}
+
 	log.Printf("[INFO] Database schema created successfully")
 
 	// Return the database connection
@@ -1457,6 +1477,21 @@ func migrateSchema(db *sql.DB, fromVersion, toVersion int) error {
 				return err
 			}
 			log.Printf("[INFO] Successfully migrated to schema version 13")
+
+		case 13:
+			log.Printf("[INFO] Migrating from v13 to v14: Adding alert silences")
+
+			_, err := db.Exec(createAlertSilencesTable)
+			if err != nil {
+				return fmt.Errorf("migration v13->v14 failed creating alert_silences table: %w", err)
+			}
+
+			fromVersion = 14
+			err = setSchemaVersion(db, fromVersion)
+			if err != nil {
+				return err
+			}
+			log.Printf("[INFO] Successfully migrated to schema version 14")
 
 		default:
 			return fmt.Errorf("no migration path from version %d", fromVersion)

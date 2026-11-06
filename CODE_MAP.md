@@ -11,7 +11,7 @@ cmd/cmonit/main.go          Entry point, two HTTP servers, daemon mode, signal h
 internal/
   config/config.go          TOML config loader with CLI override priority
   db/
-    schema.go               SQLite schema definition + incremental migrations (v1→v13)
+    schema.go               SQLite schema definition + incremental migrations (v1→v14)
     storage.go              All persistence logic (insert/update/query helpers)
   parser/
     xml.go                  Monit XML → Go structs, gzip + charset handling
@@ -85,6 +85,7 @@ Background goroutine every 60 s: `RecordAvailabilityForAllHosts()`.
 | host_availability     | Periodic green/yellow/red snapshots               |
 | alert_channels/rules/rule_channels | Alert media and rules (schema v13)     |
 | alert_state           | Per host/service failed/notified state for the alert engine |
+| alert_silences        | Temporary notification suppression (schema v14)   |
 | alert_log             | Notification send attempts (pruned with retention) |
 | hostgroups            | Named groups                                      |
 | host_hostgroups       | Many-to-many hosts ↔ groups                       |

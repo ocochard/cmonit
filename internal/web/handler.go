@@ -15,6 +15,8 @@ import (
 	"html/template" // HTML templating
 	"log"           // Logging
 	"net/http"      // HTTP server
+	"path"          // File extension lookup for static files
+	"strings"       // Case-insensitive extension match
 	"time"          // Time handling
 
 	"github.com/gomarkdown/markdown"      // Markdown parser
@@ -832,21 +834,20 @@ func HandleStatic(w http.ResponseWriter, r *http.Request) {
 
 	// Set content type based on file extension
 	contentType := "application/octet-stream"
-	if len(filePath) > 4 {
-		switch filePath[len(filePath)-4:] {
-		case ".png":
-			contentType = "image/png"
-		case ".jpg", "jpeg":
-			contentType = "image/jpeg"
-		case ".svg":
-			contentType = "image/svg+xml"
-		case ".ico":
-			contentType = "image/x-icon"
-		case ".css":
-			contentType = "text/css"
-		case ".js":
-			contentType = "application/javascript"
-		}
+	// Match on the extension: slicing the last 4 bytes never matched ".js".
+	switch strings.ToLower(path.Ext(filePath)) {
+	case ".png":
+		contentType = "image/png"
+	case ".jpg", ".jpeg":
+		contentType = "image/jpeg"
+	case ".svg":
+		contentType = "image/svg+xml"
+	case ".ico":
+		contentType = "image/x-icon"
+	case ".css":
+		contentType = "text/css"
+	case ".js":
+		contentType = "application/javascript"
 	}
 
 	// Set caching headers (static files don't change often)

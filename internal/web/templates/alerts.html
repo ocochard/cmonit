@@ -68,6 +68,31 @@
             </p>
         </section>
 
+        <!-- Silences -->
+        <section class="mb-10">
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="text-xl font-semibold text-gray-800">Silences</h2>
+                <button id="addSilence" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm font-semibold">Add silence</button>
+            </div>
+            <div class="bg-white rounded-lg shadow overflow-hidden">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50"><tr>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Host</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Service</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Until</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Reason</th>
+                        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
+                    </tr></thead>
+                    <tbody id="silences" class="divide-y divide-gray-200"></tbody>
+                </table>
+            </div>
+            <p class="text-xs text-gray-500 mt-2">
+                A silence suppresses notifications for matching failures, including their recovery messages.
+                Failures that were already present when it expires stay quiet; new ones alert normally.
+                You can also silence a host from its host page.
+            </p>
+        </section>
+
         <!-- Log -->
         <section class="mb-10">
             <div class="flex items-center justify-between mb-3">
@@ -147,7 +172,7 @@ const CHANNEL_FIELDS = {
     ],
 };
 
-let channels = [], rules = [];
+let channels = [], rules = [], silences = [];
 
 function h(tag, attrs, ...children) {
     const e = document.createElement(tag);
@@ -186,9 +211,10 @@ const td = (...c) => h('td', {class: 'px-4 py-3 text-sm text-gray-800'}, ...c);
 const badge = (on) => h('span', {class: 'px-2 py-0.5 rounded text-xs font-semibold ' + (on ? 'bg-green-100 text-green-800' : 'bg-gray-200 text-gray-600')}, on ? 'on' : 'off');
 
 async function load() {
-    [channels, rules] = await Promise.all([api('GET', 'channels'), api('GET', 'rules')]);
+    [channels, rules, silences] = await Promise.all([api('GET', 'channels'), api('GET', 'rules'), api('GET', 'silences')]);
     renderChannels();
     renderRules();
+    renderSilences();
     await loadLog();
 }
 
@@ -259,6 +285,21 @@ function renderRules() {
                 await api('DELETE', `rules/${r.id}`); await load();
             }), 'text-red-600'),
         ),
+    )));
+}
+
+function renderSilences() {
+    const body = document.getElementById('silences');
+    if (!silences.length) {
+        body.replaceChildren(h('tr', {}, h('td', {colspan: 5, class: 'px-4 py-6 text-center text-sm text-gray-500'}, 'No active silences')));
+        return;
+    }
+    body.replaceChildren(...silences.map(x => h('tr', {},
+        td(x.host_pattern), td(x.service_pattern),
+        td(x.expires_at ? new Date(x.expires_at * 1000).toLocaleString() : 'until removed'),
+        td(x.reason),
+        h('td', {class: 'px-4 py-3 text-sm text-right whitespace-nowrap'},
+            btn('Remove', () => guarded(async () => { await api('DELETE', `silences/${x.id}`); await load(); }), 'text-red-600')),
     )));
 }
 
@@ -401,6 +442,29 @@ function editRule(existing) {
     });
 }
 
+function editSilence() {
+    const host = h('input', {class: inputCls, value: '*'});
+    const service = h('input', {class: inputCls, value: '*'});
+    const duration = h('select', {class: inputCls},
+        ...[['1 hour', 3600], ['4 hours', 14400], ['24 hours', 86400], ['7 days', 604800], ['Until removed', 0]]
+            .map(([label, secs]) => h('option', {value: secs, selected: secs === 14400}, label)));
+    const reason = h('input', {class: inputCls, maxlength: 200, placeholder: 'e.g. kernel upgrade'});
+    openForm('Add silence', [
+        field('Host name (glob, * and ?)', host, '* silences every host.'),
+        field('Service name (glob)', service, 'Only * also silences the host-offline alert.'),
+        field('Duration', duration),
+        field('Reason (optional)', reason),
+    ], async () => {
+        await api('POST', 'silences', {
+            host_pattern: host.value.trim() || '*',
+            service_pattern: service.value.trim() || '*',
+            duration_seconds: Number(duration.value),
+            reason: reason.value.trim(),
+        });
+    });
+}
+
+document.getElementById('addSilence').addEventListener('click', editSilence);
 document.getElementById('addChannel').addEventListener('click', () => editChannel(null));
 document.getElementById('addRule').addEventListener('click', () => editRule(null));
 document.getElementById('refreshLog').addEventListener('click', () => guarded(loadLog));

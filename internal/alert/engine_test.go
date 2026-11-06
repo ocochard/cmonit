@@ -326,3 +326,103 @@ func TestDescribeFailure(t *testing.T) {
 		}
 	}
 }
+
+func (h *harness) silence(host, service string, d time.Duration) {
+	h.t.Helper()
+	s := Silence{HostPattern: host, ServicePattern: service, DurationSeconds: int64(d.Seconds())}
+	if err := SaveSilence(h.db, &s, h.clock); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
+func TestSilenceSuppressesFailureAndStaysQuietAfterExpiry(t *testing.T) {
+	h := newHarness(t)
+	h.addRule(Rule{Name: "all", HoldSeconds: 0, NotifyRecovery: true})
+	h.silence("web01", "*", time.Hour)
+
+	h.post("svc0")
+	h.flush()
+	h.expect() // silenced
+
+	h.advance(2 * time.Hour) // silence expired, svc0 still failing
+	h.post("svc0")
+	h.flush()
+	h.expect() // known failure stays quiet
+
+	h.post("svc0", "svc1") // a new failure after the silence alerts normally
+	h.flush()
+	h.expect("failure:1")
+	if got := h.sent[0].Items[0].Service; got != "svc1" {
+		t.Fatalf("alerted on %q, want svc1", got)
+	}
+}
+
+func TestSilenceSuppressesRecoveryOfNotifiedFailure(t *testing.T) {
+	h := newHarness(t)
+	h.addRule(Rule{Name: "all", HoldSeconds: 0, NotifyRecovery: true})
+
+	h.post("svc0")
+	h.flush()
+	h.expect("failure:1")
+
+	h.silence("*", "*", time.Hour)
+	h.advance(30 * time.Second)
+	h.post() // recovers while silenced
+	h.flush()
+	h.expect("failure:1") // no recovery message
+
+	h.advance(2 * time.Hour)
+	h.post()
+	h.flush()
+	h.expect("failure:1") // and none after expiry
+}
+
+func TestSilenceMatchesByHostAndService(t *testing.T) {
+	h := newHarness(t)
+	h.addRule(Rule{Name: "all", HoldSeconds: 0})
+	h.silence("other*", "*", time.Hour)   // different host
+	h.silence("web01", "svc1", time.Hour) // only one service
+
+	h.post("svc0", "svc1")
+	h.flush()
+	h.expect("failure:1")
+	if got := h.sent[0].Items[0].Service; got != "svc0" {
+		t.Fatalf("alerted on %q, want svc0", got)
+	}
+}
+
+func TestSilenceUntilRemovedAndDelete(t *testing.T) {
+	h := newHarness(t)
+	h.addRule(Rule{Name: "all", HoldSeconds: 0})
+	h.silence("web01", "*", 0) // until removed
+
+	h.advance(1000 * time.Hour)
+	list, err := ListActiveSilences(h.db, h.clock)
+	if err != nil || len(list) != 1 || list[0].ExpiresAt != 0 {
+		t.Fatalf("silences = %+v, err = %v", list, err)
+	}
+	if err := DeleteSilence(h.db, list[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := DeleteSilence(h.db, list[0].ID); err != ErrNotFound {
+		t.Fatalf("second delete err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestSilenceOnlyHostWideCoversOfflineIncident(t *testing.T) {
+	h := newHarness(t)
+	h.addRule(Rule{Name: "host", Trigger: TriggerHostOffline, HoldSeconds: 0})
+	h.silence("web01", "svc1", time.Hour) // service-specific: must not hide the host incident
+
+	h.advance(10 * time.Minute)
+	h.flush()
+	h.expect("host_offline:1")
+}
+
+func TestSilenceRejectsNegativeDuration(t *testing.T) {
+	h := newHarness(t)
+	s := Silence{DurationSeconds: -1}
+	if err := SaveSilence(h.db, &s, h.clock); !IsInvalid(err) {
+		t.Fatalf("err = %v, want InvalidError", err)
+	}
+}

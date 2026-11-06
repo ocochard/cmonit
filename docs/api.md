@@ -112,6 +112,8 @@ JSON in and out. `POST`/`PUT` require `Content-Type: application/json`. Errors: 
 | POST | `/api/alerts/channels/{id}/test` | Send a test notification (no body) |
 | GET, POST | `/api/alerts/rules` | List / create rules |
 | PUT, DELETE | `/api/alerts/rules/{id}` | Update (omitted fields keep their value) / delete a rule |
+| GET, POST | `/api/alerts/silences` | List active / create silences |
+| DELETE | `/api/alerts/silences/{id}` | Remove a silence |
 | GET | `/api/alerts/log?limit=N` | Newest send attempts (default 100, max 500) |
 
 Channel: `{"name", "type", "config", "enabled"}`. Types and config keys:
@@ -131,6 +133,8 @@ Rule: `{"name", "enabled", "trigger", "host_pattern", "service_pattern", "servic
 - `hold_seconds` (default 30): a failure is sent only after the oldest matching failure is this old. Everything failing on any host inside that window goes out as one notification; services that recover during it are never reported.
 - `cooldown_seconds`: minimum gap before the same service is notified again after a flap.
 - `notify_recovery` (default true): send one grouped message when notified failures recover.
+
+Silence: `{"host_pattern", "service_pattern", "duration_seconds", "reason"}` in; `{"id", "host_pattern", "service_pattern", "expires_at", "reason"}` out (`expires_at` is unix seconds, 0 means until removed). `duration_seconds` 0 means until removed. Patterns default to `*`. While a silence matches, failures are marked as notified without sending, and pending recovery messages are dropped, so failures already present when it expires stay quiet and new ones alert normally. A host-offline incident is only silenced when `service_pattern` is `*`. Expired silences are deleted by the engine.
 
 Failure times are Monit's own check timestamps. Notifications list items oldest first with offsets (`+4s`) and name the earliest in the subject (`first: postgres@db01`). This is a hint, not a root-cause diagnosis: resolution is one second at best and in practice the agents' poll interval, and agent clocks may differ.
 

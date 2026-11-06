@@ -37,6 +37,7 @@
                             <p class="text-sm opacity-90">Monit {{$host.Version}}</p>
                         </div>
                         <div class="flex gap-2 items-center">
+                            <div class="silence-control flex gap-2 items-center" data-hostname="{{$host.Hostname}}"></div>
                             <a href="/host/{{$host.ID}}/events" class="bg-blue-800 hover:bg-blue-900 px-3 py-1 rounded text-sm font-semibold transition-colors">
                                 View Events
                             </a>
@@ -890,5 +891,6 @@
         </footer>
     </div>
 
+<script src="/static/silences.js?v={{.AppVersion}}"></script>
 </body>
 </html>

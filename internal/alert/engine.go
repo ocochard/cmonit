@@ -223,6 +223,9 @@ func (e *Engine) flush(ctx context.Context) error {
 	if err := e.markOfflineHosts(now); err != nil {
 		return err
 	}
+	if _, err := e.db.Exec(`DELETE FROM alert_silences WHERE expires_at > 0 AND expires_at <= ?`, now.Unix()); err != nil {
+		return err
+	}
 	rules, err := LoadActiveRules(e.db)
 	if err != nil {
 		return err
@@ -233,6 +236,14 @@ func (e *Engine) flush(ctx context.Context) error {
 	rows, err := e.loadStates()
 	if err != nil {
 		return err
+	}
+
+	silences, err := ListActiveSilences(e.db, now)
+	if err != nil {
+		return err
+	}
+	if len(silences) > 0 {
+		rows = e.applySilences(silences, rows)
 	}
 
 	offline := map[string]bool{}
@@ -267,6 +278,37 @@ func (e *Engine) flush(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// applySilences removes silenced rows from the evaluation and settles their
+// state without sending anything: a pending failure is marked as notified, so
+// it stays quiet after the silence expires, and a pending recovery is cleared.
+// It returns the rows that are not silenced.
+func (e *Engine) applySilences(silences []Silence, rows []stateRow) []stateRow {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	var kept []stateRow
+	for _, r := range rows {
+		silenced := false
+		for _, s := range silences {
+			if s.matches(r) {
+				silenced = true
+				break
+			}
+		}
+		if !silenced {
+			kept = append(kept, r)
+			continue
+		}
+		switch {
+		case r.Failed && !r.Notified:
+			e.db.Exec(`UPDATE alert_state SET notified = 1 WHERE host_id = ? AND service_name = ? AND failed = 1 AND notified = 0`, r.HostID, r.Service)
+		case !r.Failed && r.Notified:
+			e.db.Exec(`UPDATE alert_state SET notified = 0 WHERE host_id = ? AND service_name = ? AND failed = 0 AND notified = 1`, r.HostID, r.Service)
+		}
+	}
+	return kept
 }
 
 func (e *Engine) evalRule(ctx context.Context, now time.Time, rule Rule, rows []stateRow,

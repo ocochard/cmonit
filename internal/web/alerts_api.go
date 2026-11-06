@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ocochard/cmonit/internal/alert"
 )
@@ -38,6 +39,8 @@ func SetAlertEngine(e *alert.Engine) {
 //	POST            /api/alerts/channels/{id}/test
 //	GET|POST        /api/alerts/rules
 //	PUT|DELETE      /api/alerts/rules/{id}
+//	GET|POST        /api/alerts/silences
+//	DELETE          /api/alerts/silences/{id}
 //	GET             /api/alerts/log?limit=N
 //
 // Channel secrets are masked in responses; sending the masked value back on
@@ -74,6 +77,14 @@ func HandleAlertsAPI(w http.ResponseWriter, r *http.Request) {
 		alertRulesCollection(w, r)
 	case parts[0] == "rules" && len(parts) == 2:
 		alertRuleItem(w, r, id)
+	case parts[0] == "silences" && len(parts) == 1:
+		alertSilencesCollection(w, r)
+	case parts[0] == "silences" && len(parts) == 2 && r.Method == http.MethodDelete:
+		if err := alert.DeleteSilence(db, id); err != nil {
+			alertError(w, err)
+			return
+		}
+		respondJSON(w, map[string]string{"status": "deleted"}, http.StatusOK)
 	case parts[0] == "log" && len(parts) == 1 && r.Method == http.MethodGet:
 		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 		entries, err := alert.ListLog(db, limit)
@@ -251,6 +262,32 @@ func alertRuleItem(w http.ResponseWriter, r *http.Request, id int64) {
 			return
 		}
 		respondJSON(w, map[string]string{"status": "deleted"}, http.StatusOK)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func alertSilencesCollection(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		list, err := alert.ListActiveSilences(db, time.Now())
+		if err != nil {
+			alertError(w, err)
+			return
+		}
+		respondJSON(w, list, http.StatusOK)
+	case http.MethodPost:
+		var sl alert.Silence
+		if !decodeBody(w, r, &sl) {
+			return
+		}
+		sl.ID = 0
+		if err := alert.SaveSilence(db, &sl, time.Now()); err != nil {
+			alertError(w, err)
+			return
+		}
+		sl.DurationSeconds = 0
+		respondJSON(w, sl, http.StatusCreated)
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}

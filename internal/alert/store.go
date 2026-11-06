@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Rule triggers.
@@ -418,4 +419,82 @@ func ListLog(db *sql.DB, limit int) ([]LogEntry, error) {
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// Silence suppresses notifications for failures matching its globs until
+// ExpiresAt. A host-level (offline) incident is only silenced by a silence
+// whose service pattern is "*".
+type Silence struct {
+	ID             int64  `json:"id"`
+	HostPattern    string `json:"host_pattern"`
+	ServicePattern string `json:"service_pattern"`
+	ExpiresAt      int64  `json:"expires_at"` // unix seconds, 0 = until removed
+	Reason         string `json:"reason"`
+
+	// DurationSeconds is input only: SaveSilence turns it into ExpiresAt.
+	// 0 means until removed.
+	DurationSeconds int64 `json:"duration_seconds,omitempty"`
+}
+
+func (s Silence) matches(r stateRow) bool {
+	if !globMatch(s.HostPattern, r.Hostname) {
+		return false
+	}
+	if r.Service == "" {
+		return s.ServicePattern == "" || s.ServicePattern == "*"
+	}
+	return globMatch(s.ServicePattern, r.Service)
+}
+
+const maxReasonLen = 200
+
+// SaveSilence creates a silence starting at now and sets s.ID and s.ExpiresAt.
+func SaveSilence(db *sql.DB, s *Silence, now time.Time) error {
+	if s.HostPattern == "" {
+		s.HostPattern = "*"
+	}
+	if s.ServicePattern == "" {
+		s.ServicePattern = "*"
+	}
+	if s.DurationSeconds < 0 {
+		return invalid("duration_seconds must be >= 0")
+	}
+	if len(s.Reason) > maxReasonLen {
+		return invalid("reason is limited to %d characters", maxReasonLen)
+	}
+	s.ExpiresAt = 0
+	if s.DurationSeconds > 0 {
+		s.ExpiresAt = now.Unix() + s.DurationSeconds
+	}
+	res, err := db.Exec(`INSERT INTO alert_silences (host_pattern, service_pattern, expires_at, reason) VALUES (?, ?, ?, ?)`,
+		s.HostPattern, s.ServicePattern, s.ExpiresAt, s.Reason)
+	if err != nil {
+		return err
+	}
+	s.ID, err = res.LastInsertId()
+	return err
+}
+
+// ListActiveSilences returns silences that have not expired at now.
+func ListActiveSilences(db *sql.DB, now time.Time) ([]Silence, error) {
+	rows, err := db.Query(`SELECT id, host_pattern, service_pattern, expires_at, reason FROM alert_silences
+		WHERE expires_at = 0 OR expires_at > ? ORDER BY id`, now.Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Silence{}
+	for rows.Next() {
+		var s Silence
+		if err := rows.Scan(&s.ID, &s.HostPattern, &s.ServicePattern, &s.ExpiresAt, &s.Reason); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+func DeleteSilence(db *sql.DB, id int64) error {
+	res, err := db.Exec(`DELETE FROM alert_silences WHERE id = ?`, id)
+	return checkAffected(res, err)
 }

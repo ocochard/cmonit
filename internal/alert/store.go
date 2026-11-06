@@ -77,7 +77,7 @@ type LogEntry struct {
 	Error     string `json:"error"`
 }
 
-var secretKeys = map[string]bool{"password": true, "bot_token": true, "webhook_url": true, "url": true}
+var secretKeys = map[string]bool{"password": true, "bot_token": true, "webhook_url": true, "url": true, "token": true}
 
 // MaskConfig returns the config with secrets replaced by MaskedSecret.
 func MaskConfig(raw json.RawMessage) json.RawMessage {

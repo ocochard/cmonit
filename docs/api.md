@@ -118,9 +118,11 @@ Channel: `{"name", "type", "config", "enabled"}`. Types and config keys:
 - `email`: `host`, `port` (default 25), `username`, `password`, `from`, `to` (list). STARTTLS if the server offers it; implicit TLS (465) is not supported.
 - `telegram`: `bot_token`, `chat_id`
 - `slack`: `webhook_url` (incoming webhook)
-- `webhook`: `url`, optional `headers`. POSTs `{kind, subject, time, items:[{host_id, hostname, service, type, message, since}]}`. Use it for ntfy, Discord, Teams, Twilio/WhatsApp gateways.
+- `discord`: `webhook_url`, optional `username`. Messages are cut at Discord's 2000-character limit and sent with mentions disabled.
+- `ntfy`: `server` (default `https://ntfy.sh`), `topic`, optional `token` (Bearer) or `username` + `password` (Basic). Failures use priority `high`, recoveries `default`.
+- `webhook`: `url`, optional `headers`. POSTs cmonit's own JSON `{kind, subject, time, items:[{host_id, hostname, service, type, message, since}]}`. Targets that expect another format (Teams, Twilio) need a relay.
 
-`password`, `bot_token`, `webhook_url`, `url` and header values are returned as `***`. Sending `***` back on `PUT` keeps the stored value.
+`password`, `token`, `bot_token`, `webhook_url`, `url` and header values are returned as `***`. Sending `***` back on `PUT` keeps the stored value.
 
 Rule: `{"name", "enabled", "trigger", "host_pattern", "service_pattern", "service_types", "hold_seconds", "cooldown_seconds", "notify_recovery", "channel_ids"}`.
 - `trigger`: `service_failure` (default) or `host_offline` (no data for 5 poll intervals).

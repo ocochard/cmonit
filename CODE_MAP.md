@@ -19,7 +19,7 @@ internal/
   alert/
     engine.go               State tracking (alert_state), hold/cooldown grouping, flush loop
     store.go                Channel/rule CRUD, secret masking
-    notifier.go             Notifier interface: email, telegram, slack, webhook
+    notifier.go             Notifier interface: email, telegram, slack, discord, ntfy, webhook
   control/
     actions.go              Remote Monit actions (start/stop/restart/monitor)
   web/

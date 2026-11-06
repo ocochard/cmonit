@@ -8,12 +8,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/smtp"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Notification kinds.
@@ -186,8 +189,29 @@ func NewNotifier(channelType string, config json.RawMessage) (Notifier, error) {
 			return nil, fmt.Errorf("webhook config requires url")
 		}
 		return &c, nil
+	case "discord":
+		var c discordConfig
+		if err := json.Unmarshal(config, &c); err != nil {
+			return nil, fmt.Errorf("invalid discord config: %w", err)
+		}
+		if c.WebhookURL == "" {
+			return nil, fmt.Errorf("discord config requires webhook_url")
+		}
+		return &c, nil
+	case "ntfy":
+		var c ntfyConfig
+		if err := json.Unmarshal(config, &c); err != nil {
+			return nil, fmt.Errorf("invalid ntfy config: %w", err)
+		}
+		if c.Server == "" {
+			c.Server = "https://ntfy.sh"
+		}
+		if !ntfyTopicRe.MatchString(c.Topic) {
+			return nil, fmt.Errorf("ntfy config requires topic (letters, digits, - and _, up to 64 characters)")
+		}
+		return &c, nil
 	default:
-		return nil, fmt.Errorf("unknown channel type %q (supported: email, telegram, slack, webhook)", channelType)
+		return nil, fmt.Errorf("unknown channel type %q (supported: email, telegram, slack, discord, ntfy, webhook)", channelType)
 	}
 }
 
@@ -196,13 +220,25 @@ func postJSON(ctx context.Context, target string, headers map[string]string, pay
 	if err != nil {
 		return err
 	}
+	h := map[string]string{"Content-Type": "application/json"}
+	for k, v := range headers {
+		h[k] = v
+	}
+	return doPost(ctx, target, h, body, nil)
+}
+
+// doPost sends one POST and treats any non-2xx status as an error. setup may
+// adjust the request (for example to add auth) before it is sent.
+func doPost(ctx context.Context, target string, headers map[string]string, body []byte, setup func(*http.Request)) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
 	for k, v := range headers {
 		req.Header.Set(k, v)
+	}
+	if setup != nil {
+		setup(req)
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
@@ -297,12 +333,91 @@ type webhookPayload struct {
 	Items   []webhookItem `json:"items"`
 }
 
-// Send posts a structured JSON payload; this is the integration point for
-// anything without a dedicated notifier (ntfy, Discord, Teams, WhatsApp via Twilio, ...).
+// Send posts cmonit's own JSON payload. Targets that expect a specific format
+// (Teams, Twilio, ...) need a relay that translates it.
 func (c *webhookConfig) Send(ctx context.Context, n Notification) error {
 	p := webhookPayload{Kind: n.Kind, Subject: n.Subject(), Time: n.At.Unix(), Items: make([]webhookItem, 0, len(n.Items))}
 	for _, it := range n.Items {
 		p.Items = append(p.Items, webhookItem{HostID: it.HostID, Hostname: it.Hostname, Service: it.Service, Type: it.Type, Message: it.Message, Since: it.Since.Unix()})
 	}
 	return postJSON(ctx, c.URL, c.Headers, p)
+}
+
+type discordConfig struct {
+	WebhookURL string `json:"webhook_url"`
+	Username   string `json:"username"`
+}
+
+// discordMaxContent is Discord's documented limit for message content.
+const discordMaxContent = 2000
+
+// Send posts to a Discord webhook. allowed_mentions is emptied so service
+// names or program output containing @everyone cannot ping anyone.
+func (c *discordConfig) Send(ctx context.Context, n Notification) error {
+	payload := map[string]any{
+		"content":          truncateRunes(n.Body(), discordMaxContent),
+		"allowed_mentions": map[string]any{"parse": []string{}},
+	}
+	if c.Username != "" {
+		payload["username"] = c.Username
+	}
+	return postJSON(ctx, c.WebhookURL, nil, payload)
+}
+
+var ntfyTopicRe = regexp.MustCompile(`^[-_A-Za-z0-9]{1,64}$`)
+
+// ntfyMaxBody keeps below ntfy's 4096-byte limit, above which the message
+// becomes an attachment instead of text.
+const ntfyMaxBody = 4000
+
+type ntfyConfig struct {
+	Server   string `json:"server"`
+	Topic    string `json:"topic"`
+	Token    string `json:"token"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+// Send publishes to <server>/<topic>. A token is sent as a Bearer token,
+// otherwise username/password as Basic auth; both are optional.
+func (c *ntfyConfig) Send(ctx context.Context, n Notification) error {
+	priority, tags := "high", "warning"
+	if n.Kind == KindRecovery || n.Kind == KindHostOnline {
+		priority, tags = "default", "white_check_mark"
+	}
+	headers := map[string]string{
+		"Title":    mime.BEncoding.Encode("UTF-8", n.Subject()),
+		"Priority": priority,
+		"Tags":     tags,
+	}
+	body := truncateBytes(n.Body(), ntfyMaxBody)
+	target := strings.TrimRight(c.Server, "/") + "/" + c.Topic
+	return doPost(ctx, target, headers, []byte(body), func(req *http.Request) {
+		switch {
+		case c.Token != "":
+			req.Header.Set("Authorization", "Bearer "+c.Token)
+		case c.Username != "":
+			req.SetBasicAuth(c.Username, c.Password)
+		}
+	})
+}
+
+func truncateRunes(s string, max int) string {
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max-3]) + "..."
+}
+
+// truncateBytes cuts at a rune boundary.
+func truncateBytes(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	cut := max - 3
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "..."
 }

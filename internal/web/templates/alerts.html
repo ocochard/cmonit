@@ -130,6 +130,17 @@ const CHANNEL_FIELDS = {
     slack: [
         {key: 'webhook_url', label: 'Incoming webhook URL', secret: true},
     ],
+    discord: [
+        {key: 'webhook_url', label: 'Webhook URL', secret: true},
+        {key: 'username', label: 'Display name (optional)'},
+    ],
+    ntfy: [
+        {key: 'server', label: 'Server URL', def: 'https://ntfy.sh'},
+        {key: 'topic', label: 'Topic (acts as a password on public servers)'},
+        {key: 'token', label: 'Access token (optional)', secret: true},
+        {key: 'username', label: 'Username (optional, used if no token)'},
+        {key: 'password', label: 'Password', secret: true},
+    ],
     webhook: [
         {key: 'url', label: 'URL', secret: true},
         {key: 'headers', label: 'Headers (one "Name: value" per line)', headers: true, textarea: true},

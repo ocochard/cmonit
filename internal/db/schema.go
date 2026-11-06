@@ -545,7 +545,7 @@ const (
 	// Columns:
 	//   - id: Auto-incrementing integer
 	//   - host_id: Which host this metric is from
-	//   - service_name: File service name (e.g., "metatron")
+	//   - service_name: File service name (e.g., "client-cert")
 	//   - mode: File permission mode (e.g., "644", "755")
 	//   - uid: User ID of file owner
 	//   - gid: Group ID of file owner
@@ -582,7 +582,7 @@ const (
 	// createFileMetricsIndex creates index for fast file metrics queries
 	//
 	// Optimizes queries like:
-	// "Show me file changes for metatron on host123 over the last week"
+	// "Show me file changes for client-cert on host123 over the last week"
 	createFileMetricsIndex = `
 	CREATE INDEX IF NOT EXISTS idx_file_metrics_lookup
 		ON file_metrics(host_id, service_name, collected_at);`

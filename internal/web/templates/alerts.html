@@ -402,7 +402,7 @@ function editRule(existing) {
         return h('label', {class: 'inline-flex items-center mr-4 text-sm text-gray-700'}, cb, label);
     });
     const exHost = h('input', {class: inputCls, value: r.exclude_host_pattern ?? '*'});
-    const exService = h('input', {class: inputCls, value: r.exclude_service_pattern ?? '', placeholder: 'e.g. metatron (empty = no exclusion)'});
+    const exService = h('input', {class: inputCls, value: r.exclude_service_pattern ?? '', placeholder: 'e.g. client-cert (empty = no exclusion)'});
     const serviceBlock = h('div', {class: 'space-y-3'},
         field('Service name (glob)', service),
         field('Service types', h('div', {}, ...typeBoxes), 'None selected means all types.'));

@@ -338,7 +338,7 @@ File monitoring is now fully implemented (Schema v4, 2025-11-24):
 - **Size tracking**: File size stored in bytes for trend analysis
 - **Hard link detection**: Hard link count stored to identify files with multiple links
 
-**Example**: File service "metatron" shows mode 644, size 1998 bytes, MD5 checksum d756761bf145910c0890b6f5db366ada
+**Example**: File service "client-cert" shows mode 644, size 1998 bytes, MD5 checksum d756761bf145910c0890b6f5db366ada
 
 ---
 

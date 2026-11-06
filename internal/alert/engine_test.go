@@ -628,10 +628,10 @@ func TestRuleExclusionWildcardAlsoExcludesHostOffline(t *testing.T) {
 
 func TestRuleExclusionAppliesToChangedEvents(t *testing.T) {
 	h := newHarness(t)
-	h.addRule(Rule{Name: "all", HoldSeconds: 0, ExcludeServicePattern: "metatron"})
+	h.addRule(Rule{Name: "all", HoldSeconds: 0, ExcludeServicePattern: "client-cert"})
 
-	h.postSvc(changedSvc("metatron", 2)) // checksum changed, excluded
-	h.postSvc(changedSvc("metatron", 2), changedSvc("conf", 48))
+	h.postSvc(changedSvc("client-cert", 2)) // checksum changed, excluded
+	h.postSvc(changedSvc("client-cert", 2), changedSvc("conf", 48))
 	h.flush()
 	h.expect("event:1")
 	if got := h.sent[0].Items[0].Service; got != "conf" {
@@ -641,7 +641,7 @@ func TestRuleExclusionAppliesToChangedEvents(t *testing.T) {
 
 func TestRuleExclusionRoundTripAndDefaults(t *testing.T) {
 	h := newHarness(t)
-	r := Rule{Name: "r", Enabled: true, ExcludeServicePattern: "metatron"}
+	r := Rule{Name: "r", Enabled: true, ExcludeServicePattern: "client-cert"}
 	if err := SaveRule(h.db, &r); err != nil {
 		t.Fatal(err)
 	}
@@ -649,7 +649,7 @@ func TestRuleExclusionRoundTripAndDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.ExcludeHostPattern != "*" || got.ExcludeServicePattern != "metatron" {
+	if got.ExcludeHostPattern != "*" || got.ExcludeServicePattern != "client-cert" {
 		t.Fatalf("exclusion = %q / %q", got.ExcludeHostPattern, got.ExcludeServicePattern)
 	}
 }

@@ -50,17 +50,23 @@ type Channel struct {
 
 // Rule selects which failures notify which channels.
 type Rule struct {
-	ID              int64   `json:"id"`
-	Name            string  `json:"name"`
-	Enabled         bool    `json:"enabled"`
-	Trigger         string  `json:"trigger"`
-	HostPattern     string  `json:"host_pattern"`
-	ServicePattern  string  `json:"service_pattern"`
-	ServiceTypes    []int   `json:"service_types"`
-	HoldSeconds     int     `json:"hold_seconds"`
-	CooldownSeconds int     `json:"cooldown_seconds"`
-	NotifyRecovery  bool    `json:"notify_recovery"`
-	ChannelIDs      []int64 `json:"channel_ids"`
+	ID             int64  `json:"id"`
+	Name           string `json:"name"`
+	Enabled        bool   `json:"enabled"`
+	Trigger        string `json:"trigger"`
+	HostPattern    string `json:"host_pattern"`
+	ServicePattern string `json:"service_pattern"`
+	ServiceTypes   []int  `json:"service_types"`
+
+	// ExcludeServicePattern skips failures whose host matches
+	// ExcludeHostPattern and whose service matches it. Empty disables the
+	// exclusion; "*" excludes every service (and host-offline) of matching hosts.
+	ExcludeHostPattern    string  `json:"exclude_host_pattern"`
+	ExcludeServicePattern string  `json:"exclude_service_pattern"`
+	HoldSeconds           int     `json:"hold_seconds"`
+	CooldownSeconds       int     `json:"cooldown_seconds"`
+	NotifyRecovery        bool    `json:"notify_recovery"`
+	ChannelIDs            []int64 `json:"channel_ids"`
 
 	Channels []Channel `json:"-"` // enabled channels, filled by LoadActiveRules
 }
@@ -225,13 +231,13 @@ func joinTypes(t []int) string {
 	return strings.Join(parts, ",")
 }
 
-const ruleColumns = `id, name, enabled, trigger, host_pattern, service_pattern, service_types, hold_seconds, cooldown_seconds, notify_recovery`
+const ruleColumns = `id, name, enabled, trigger, host_pattern, service_pattern, service_types, exclude_host_pattern, exclude_service_pattern, hold_seconds, cooldown_seconds, notify_recovery`
 
 func scanRule(sc interface{ Scan(...any) error }) (Rule, error) {
 	var r Rule
 	var types string
 	err := sc.Scan(&r.ID, &r.Name, &r.Enabled, &r.Trigger, &r.HostPattern, &r.ServicePattern, &types,
-		&r.HoldSeconds, &r.CooldownSeconds, &r.NotifyRecovery)
+		&r.ExcludeHostPattern, &r.ExcludeServicePattern, &r.HoldSeconds, &r.CooldownSeconds, &r.NotifyRecovery)
 	r.ServiceTypes = parseTypes(types)
 	r.ChannelIDs = []int64{}
 	return r, err
@@ -343,6 +349,9 @@ func (r *Rule) Validate() error {
 	if r.ServicePattern == "" {
 		r.ServicePattern = "*"
 	}
+	if r.ExcludeHostPattern == "" {
+		r.ExcludeHostPattern = "*"
+	}
 	if r.HoldSeconds < 0 || r.CooldownSeconds < 0 {
 		return invalid("hold_seconds and cooldown_seconds must be >= 0")
 	}
@@ -366,9 +375,9 @@ func SaveRule(db *sql.DB, r *Rule) error {
 	defer tx.Rollback()
 
 	if r.ID == 0 {
-		res, err := tx.Exec(`INSERT INTO alert_rules (name, enabled, trigger, host_pattern, service_pattern, service_types, hold_seconds, cooldown_seconds, notify_recovery)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			r.Name, r.Enabled, r.Trigger, r.HostPattern, r.ServicePattern, joinTypes(r.ServiceTypes), r.HoldSeconds, r.CooldownSeconds, r.NotifyRecovery)
+		res, err := tx.Exec(`INSERT INTO alert_rules (name, enabled, trigger, host_pattern, service_pattern, service_types, exclude_host_pattern, exclude_service_pattern, hold_seconds, cooldown_seconds, notify_recovery)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			r.Name, r.Enabled, r.Trigger, r.HostPattern, r.ServicePattern, joinTypes(r.ServiceTypes), r.ExcludeHostPattern, r.ExcludeServicePattern, r.HoldSeconds, r.CooldownSeconds, r.NotifyRecovery)
 		if err != nil {
 			return err
 		}
@@ -376,9 +385,9 @@ func SaveRule(db *sql.DB, r *Rule) error {
 			return err
 		}
 	} else {
-		res, err := tx.Exec(`UPDATE alert_rules SET name = ?, enabled = ?, trigger = ?, host_pattern = ?, service_pattern = ?, service_types = ?,
+		res, err := tx.Exec(`UPDATE alert_rules SET name = ?, enabled = ?, trigger = ?, host_pattern = ?, service_pattern = ?, service_types = ?, exclude_host_pattern = ?, exclude_service_pattern = ?,
 			hold_seconds = ?, cooldown_seconds = ?, notify_recovery = ? WHERE id = ?`,
-			r.Name, r.Enabled, r.Trigger, r.HostPattern, r.ServicePattern, joinTypes(r.ServiceTypes), r.HoldSeconds, r.CooldownSeconds, r.NotifyRecovery, r.ID)
+			r.Name, r.Enabled, r.Trigger, r.HostPattern, r.ServicePattern, joinTypes(r.ServiceTypes), r.ExcludeHostPattern, r.ExcludeServicePattern, r.HoldSeconds, r.CooldownSeconds, r.NotifyRecovery, r.ID)
 		if err := checkAffected(res, err); err != nil {
 			return err
 		}

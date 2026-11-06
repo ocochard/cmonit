@@ -557,7 +557,7 @@ func (e *Engine) markOfflineHosts(now time.Time) error {
 
 // matches reports whether the rule applies to the state row.
 func (r Rule) matches(s stateRow) bool {
-	if !globMatch(r.HostPattern, s.Hostname) {
+	if !globMatch(r.HostPattern, s.Hostname) || r.excludes(s) {
 		return false
 	}
 	if r.Trigger == TriggerHostOffline {
@@ -575,6 +575,18 @@ func (r Rule) matches(s stateRow) bool {
 		}
 	}
 	return false
+}
+
+// excludes reports whether the rule's exclusion covers the row. Both patterns
+// must match; a host-level (offline) row is only excluded by service pattern "*".
+func (r Rule) excludes(s stateRow) bool {
+	if r.ExcludeServicePattern == "" || !globMatch(r.ExcludeHostPattern, s.Hostname) {
+		return false
+	}
+	if s.Service == "" {
+		return r.ExcludeServicePattern == "*"
+	}
+	return globMatch(r.ExcludeServicePattern, s.Service)
 }
 
 // globMatch supports * and ? and, unlike path.Match, lets * cross '/' because

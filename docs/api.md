@@ -126,10 +126,11 @@ Channel: `{"name", "type", "config", "enabled"}`. Types and config keys:
 
 `password`, `token`, `bot_token`, `webhook_url`, `url` and header values are returned as `***`. Sending `***` back on `PUT` keeps the stored value.
 
-Rule: `{"name", "enabled", "trigger", "host_pattern", "service_pattern", "service_types", "hold_seconds", "cooldown_seconds", "notify_recovery", "channel_ids"}`.
+Rule: `{"name", "enabled", "trigger", "host_pattern", "service_pattern", "service_types", "exclude_host_pattern", "exclude_service_pattern", "hold_seconds", "cooldown_seconds", "notify_recovery", "channel_ids"}`.
 - `trigger`: `service_failure` (default) or `host_offline` (no data for 5 poll intervals).
 - `host_pattern`, `service_pattern`: glob (`*`, `?`) on hostname / service name; default `*`.
 - `service_types`: Monit service type numbers 0-8; empty means all.
+- `exclude_host_pattern` (default `*`), `exclude_service_pattern` (default empty): skip failures where both match, for example a certificate file that changes on purpose and has `noalert` in the agent. Empty service pattern disables the exclusion; `*` also excludes the host-offline alert of matching hosts. cmonit cannot see the agent's own `noalert` settings, so they are not inherited.
 - `hold_seconds` (default 30): a failure is sent only after the oldest matching failure is this old. Everything failing on any host inside that window goes out as one notification; services that recover during it are never reported.
 - `cooldown_seconds`: minimum gap before the same service is notified again after a flap.
 - `notify_recovery` (default true): send one grouped message when notified failures recover.

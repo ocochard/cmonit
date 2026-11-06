@@ -31,7 +31,7 @@ import (
 
 // currentSchemaVersion is the current database schema version.
 // Increment this when making schema changes that require migration.
-const currentSchemaVersion = 14
+const currentSchemaVersion = 15
 
 // SQL schema for the cmonit database
 //
@@ -364,6 +364,8 @@ const (
 		host_pattern TEXT NOT NULL DEFAULT '*',
 		service_pattern TEXT NOT NULL DEFAULT '*',
 		service_types TEXT NOT NULL DEFAULT '',
+		exclude_host_pattern TEXT NOT NULL DEFAULT '*',
+		exclude_service_pattern TEXT NOT NULL DEFAULT '',
 		hold_seconds INTEGER NOT NULL DEFAULT 30 CHECK (hold_seconds >= 0),
 		cooldown_seconds INTEGER NOT NULL DEFAULT 0 CHECK (cooldown_seconds >= 0),
 		notify_recovery INTEGER NOT NULL DEFAULT 1,
@@ -1492,6 +1494,36 @@ func migrateSchema(db *sql.DB, fromVersion, toVersion int) error {
 				return err
 			}
 			log.Printf("[INFO] Successfully migrated to schema version 14")
+
+		case 14:
+			log.Printf("[INFO] Migrating from v14 to v15: Adding alert rule exclusions")
+
+			// createAlertTables already has these columns for databases that
+			// were created or migrated to v13 after they were added.
+			cols := map[string]string{
+				"exclude_host_pattern":    "TEXT NOT NULL DEFAULT '*'",
+				"exclude_service_pattern": "TEXT NOT NULL DEFAULT ''",
+			}
+			for _, name := range []string{"exclude_host_pattern", "exclude_service_pattern"} {
+				var n int
+				err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('alert_rules') WHERE name = ?`, name).Scan(&n)
+				if err != nil {
+					return fmt.Errorf("migration v14->v15 failed inspecting alert_rules: %w", err)
+				}
+				if n > 0 {
+					continue
+				}
+				if _, err := db.Exec("ALTER TABLE alert_rules ADD COLUMN " + name + " " + cols[name]); err != nil {
+					return fmt.Errorf("migration v14->v15 failed adding %s: %w", name, err)
+				}
+			}
+
+			fromVersion = 15
+			err := setSchemaVersion(db, fromVersion)
+			if err != nil {
+				return err
+			}
+			log.Printf("[INFO] Successfully migrated to schema version 15")
 
 		default:
 			return fmt.Errorf("no migration path from version %d", fromVersion)

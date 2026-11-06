@@ -258,9 +258,10 @@ function renderChannels() {
 }
 
 function describeFilter(r) {
-    if (r.trigger === 'host_offline') return 'host: ' + r.host_pattern;
+    const except = r.exclude_service_pattern ? ` except host: ${r.exclude_host_pattern}, service: ${r.exclude_service_pattern}` : '';
+    if (r.trigger === 'host_offline') return 'host: ' + r.host_pattern + except;
     const types = r.service_types.length ? ' types: ' + r.service_types.map(t => SERVICE_TYPES[t] ?? t).join(', ') : '';
-    return `host: ${r.host_pattern}, service: ${r.service_pattern}${types}`;
+    return `host: ${r.host_pattern}, service: ${r.service_pattern}${types}${except}`;
 }
 
 function renderRules() {
@@ -400,6 +401,8 @@ function editRule(existing) {
         cb.dataset.type = t;
         return h('label', {class: 'inline-flex items-center mr-4 text-sm text-gray-700'}, cb, label);
     });
+    const exHost = h('input', {class: inputCls, value: r.exclude_host_pattern ?? '*'});
+    const exService = h('input', {class: inputCls, value: r.exclude_service_pattern ?? '', placeholder: 'e.g. metatron (empty = no exclusion)'});
     const serviceBlock = h('div', {class: 'space-y-3'},
         field('Service name (glob)', service),
         field('Service types', h('div', {}, ...typeBoxes), 'None selected means all types.'));
@@ -421,6 +424,8 @@ function editRule(existing) {
         field('Name', name), field('Trigger', trigger),
         field('Host name (glob, * and ?)', host),
         serviceBlock,
+        field('Exclude host (glob)', exHost, 'An exclusion applies when both the excluded host and service match.'),
+        field('Exclude service (glob)', exService, 'Empty disables it. * excludes every service of the excluded hosts, and their host-offline alert.'),
         field('Hold (seconds)', hold, 'Failures in this window are grouped into one message, across hosts.'),
         field('Cooldown (seconds)', cooldown),
         field('Send to', h('div', {class: 'space-y-1'}, ...(chBoxes.length ? chBoxes : [h('span', {class: 'text-sm text-gray-500'}, 'Create a channel first.')]))),
@@ -430,6 +435,8 @@ function editRule(existing) {
         const body = {
             name: name.value, enabled: enabled.checked, trigger: trigger.value,
             host_pattern: host.value.trim() || '*',
+            exclude_host_pattern: exHost.value.trim() || '*',
+            exclude_service_pattern: exService.value.trim(),
             service_pattern: service.value.trim() || '*',
             service_types: typeBoxes.map(l => l.querySelector('input')).filter(cb => cb.checked).map(cb => Number(cb.dataset.type)),
             hold_seconds: Number(hold.value) || 0,

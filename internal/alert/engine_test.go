@@ -580,3 +580,76 @@ func contains(list []string, s string) bool {
 	}
 	return false
 }
+
+func TestRuleExclusion(t *testing.T) {
+	h := newHarness(t)
+	h.addRule(Rule{Name: "all", HoldSeconds: 0, ExcludeServicePattern: "svc1"})
+
+	h.post("svc0", "svc1")
+	h.flush()
+	h.expect("failure:1")
+	if got := h.sent[0].Items[0].Service; got != "svc0" {
+		t.Fatalf("alerted on %q, want svc0", got)
+	}
+}
+
+func TestRuleExclusionNeedsBothHostAndService(t *testing.T) {
+	h := newHarness(t)
+	h.addRule(Rule{Name: "all", HoldSeconds: 0, ExcludeHostPattern: "other*", ExcludeServicePattern: "svc1"})
+
+	h.post("svc1") // service matches but host does not: not excluded
+	h.flush()
+	h.expect("failure:1")
+}
+
+func TestRuleExclusionEmptyServiceDisablesIt(t *testing.T) {
+	h := newHarness(t)
+	h.addRule(Rule{Name: "all", HoldSeconds: 0, ExcludeHostPattern: "web01"})
+
+	h.post("svc0")
+	h.flush()
+	h.expect("failure:1")
+}
+
+func TestRuleExclusionWildcardAlsoExcludesHostOffline(t *testing.T) {
+	h := newHarness(t)
+	h.addRule(Rule{Name: "host", Trigger: TriggerHostOffline, HoldSeconds: 0, ExcludeHostPattern: "web*", ExcludeServicePattern: "*"})
+
+	h.advance(10 * time.Minute)
+	h.flush()
+	h.expect()
+
+	h2 := newHarness(t)
+	h2.addRule(Rule{Name: "host", Trigger: TriggerHostOffline, HoldSeconds: 0, ExcludeHostPattern: "web*", ExcludeServicePattern: "svc1"})
+	h2.advance(10 * time.Minute)
+	h2.flush()
+	h2.expect("host_offline:1") // service-specific exclusion must not hide the host incident
+}
+
+func TestRuleExclusionAppliesToChangedEvents(t *testing.T) {
+	h := newHarness(t)
+	h.addRule(Rule{Name: "all", HoldSeconds: 0, ExcludeServicePattern: "metatron"})
+
+	h.postSvc(changedSvc("metatron", 2)) // checksum changed, excluded
+	h.postSvc(changedSvc("metatron", 2), changedSvc("conf", 48))
+	h.flush()
+	h.expect("event:1")
+	if got := h.sent[0].Items[0].Service; got != "conf" {
+		t.Fatalf("event for %q, want conf", got)
+	}
+}
+
+func TestRuleExclusionRoundTripAndDefaults(t *testing.T) {
+	h := newHarness(t)
+	r := Rule{Name: "r", Enabled: true, ExcludeServicePattern: "metatron"}
+	if err := SaveRule(h.db, &r); err != nil {
+		t.Fatal(err)
+	}
+	got, err := GetRule(h.db, r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ExcludeHostPattern != "*" || got.ExcludeServicePattern != "metatron" {
+		t.Fatalf("exclusion = %q / %q", got.ExcludeHostPattern, got.ExcludeServicePattern)
+	}
+}

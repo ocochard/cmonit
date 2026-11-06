@@ -13,6 +13,19 @@ import (
 
 var alertEngine *alert.Engine
 
+// HandleAlertsPage serves the alert configuration page. It is static HTML; the
+// page's JavaScript talks to /api/alerts/.
+func HandleAlertsPage(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/alerts" {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := templates.ExecuteTemplate(w, "alerts.html", struct{ AppVersion string }{appVersion}); err != nil {
+		log.Printf("[ERROR] Failed to render alerts template: %v", err)
+	}
+}
+
 // SetAlertEngine sets the engine used for channel test sends.
 func SetAlertEngine(e *alert.Engine) {
 	alertEngine = e

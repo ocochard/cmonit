@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alerts - cmonit</title>
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50">
+    <div class="container mx-auto px-4 py-8 max-w-7xl">
+        <div class="mb-8">
+            <nav class="text-sm text-gray-500 mb-2">
+                <a href="/" class="hover:text-gray-700">Home</a>
+                <span class="mx-2">/</span>
+                <span class="text-gray-900">Alerts</span>
+            </nav>
+            <div class="flex items-center">
+                <img src="/static/logo.png" alt="cmonit Logo" class="h-12 mr-4">
+                <h1 class="text-3xl font-bold text-gray-900">Alerts</h1>
+            </div>
+        </div>
+
+        <div id="error" class="hidden mb-4 p-3 rounded bg-red-100 text-red-800 text-sm"></div>
+
+        <!-- Channels -->
+        <section class="mb-10">
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="text-xl font-semibold text-gray-800">Channels</h2>
+                <button id="addChannel" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm font-semibold">Add channel</button>
+            </div>
+            <div class="bg-white rounded-lg shadow overflow-hidden">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50"><tr>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Enabled</th>
+                        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
+                    </tr></thead>
+                    <tbody id="channels" class="divide-y divide-gray-200"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Rules -->
+        <section class="mb-10">
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="text-xl font-semibold text-gray-800">Rules</h2>
+                <button id="addRule" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm font-semibold">Add rule</button>
+            </div>
+            <div class="bg-white rounded-lg shadow overflow-hidden">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50"><tr>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Trigger</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Filter</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Hold / cooldown</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Channels</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Enabled</th>
+                        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
+                    </tr></thead>
+                    <tbody id="rules" class="divide-y divide-gray-200"></tbody>
+                </table>
+            </div>
+            <p class="text-xs text-gray-500 mt-2">
+                Hold: wait this long after the first failure and send everything that failed in the window as one message.
+                Cooldown: minimum gap before the same service is notified again after a flap.
+            </p>
+        </section>
+
+        <!-- Log -->
+        <section class="mb-10">
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="text-xl font-semibold text-gray-800">Recent notifications</h2>
+                <button id="refreshLog" class="text-sm text-blue-600 hover:text-blue-800 hover:underline">Refresh</button>
+            </div>
+            <div class="bg-white rounded-lg shadow overflow-hidden">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50"><tr>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Time</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Rule</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Channel</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Subject</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                    </tr></thead>
+                    <tbody id="log" class="divide-y divide-gray-200"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <footer class="mt-12 pt-6 border-t border-gray-200 text-center text-sm text-gray-500">
+            <p>
+                <a href="https://github.com/ocochard/cmonit" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:text-blue-800 hover:underline">cmonit</a>
+                v{{.AppVersion}}
+            </p>
+        </footer>
+    </div>
+
+    <!-- Modal -->
+    <div id="modal" class="hidden fixed inset-0 bg-black bg-opacity-40 flex items-start justify-center overflow-y-auto py-10 z-50">
+        <form id="form" class="bg-white rounded-lg shadow-xl w-full max-w-lg p-6">
+            <h3 id="formTitle" class="text-lg font-semibold text-gray-900 mb-4"></h3>
+            <div id="formFields" class="space-y-3"></div>
+            <div id="formError" class="hidden mt-3 p-2 rounded bg-red-100 text-red-800 text-sm"></div>
+            <div class="flex justify-end gap-2 mt-5">
+                <button type="button" id="formCancel" class="px-3 py-1 rounded border border-gray-300 text-sm">Cancel</button>
+                <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm font-semibold">Save</button>
+            </div>
+        </form>
+    </div>
+
+<script>
+// All dynamic content is inserted with textContent / value, never innerHTML,
+// because channel and rule names are user input.
+const API = '/api/alerts/';
+const SERVICE_TYPES = {0: 'Filesystem', 1: 'Directory', 2: 'File', 3: 'Process', 4: 'Remote host', 5: 'System', 6: 'FIFO', 7: 'Program', 8: 'Network'};
+const CHANNEL_FIELDS = {
+    email: [
+        {key: 'host', label: 'SMTP host'},
+        {key: 'port', label: 'Port (STARTTLS if offered; 465 not supported)', type: 'number', def: 25},
+        {key: 'username', label: 'Username (optional)'},
+        {key: 'password', label: 'Password', secret: true},
+        {key: 'from', label: 'From address'},
+        {key: 'to', label: 'To (comma separated)', list: true},
+    ],
+    telegram: [
+        {key: 'bot_token', label: 'Bot token', secret: true},
+        {key: 'chat_id', label: 'Chat ID'},
+    ],
+    slack: [
+        {key: 'webhook_url', label: 'Incoming webhook URL', secret: true},
+    ],
+    webhook: [
+        {key: 'url', label: 'URL', secret: true},
+        {key: 'headers', label: 'Headers (one "Name: value" per line)', headers: true, textarea: true},
+    ],
+};
+
+let channels = [], rules = [];
+
+function h(tag, attrs, ...children) {
+    const e = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs || {})) {
+        if (k === 'class') e.className = v;
+        else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+        else if (v !== false && v != null) e.setAttribute(k, v === true ? '' : v);
+    }
+    for (const c of children.flat()) e.append(c instanceof Node ? c : document.createTextNode(c ?? ''));
+    return e;
+}
+
+async function api(method, path, body) {
+    const r = await fetch(API + path, {
+        method,
+        headers: {'Content-Type': 'application/json'},
+        body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+    return data;
+}
+
+function showError(msg) {
+    const e = document.getElementById('error');
+    e.textContent = msg || '';
+    e.classList.toggle('hidden', !msg);
+}
+
+async function guarded(fn) {
+    try { showError(''); await fn(); } catch (err) { showError(err.message); }
+}
+
+const btn = (label, onclick, cls) => h('button', {class: 'text-sm hover:underline ml-3 ' + (cls || 'text-blue-600'), onclick}, label);
+const td = (...c) => h('td', {class: 'px-4 py-3 text-sm text-gray-800'}, ...c);
+const badge = (on) => h('span', {class: 'px-2 py-0.5 rounded text-xs font-semibold ' + (on ? 'bg-green-100 text-green-800' : 'bg-gray-200 text-gray-600')}, on ? 'on' : 'off');
+
+async function load() {
+    [channels, rules] = await Promise.all([api('GET', 'channels'), api('GET', 'rules')]);
+    renderChannels();
+    renderRules();
+    await loadLog();
+}
+
+async function loadLog() {
+    const entries = await api('GET', 'log?limit=50');
+    const ruleName = Object.fromEntries(rules.map(r => [r.id, r.name]));
+    const chName = Object.fromEntries(channels.map(c => [c.id, c.name]));
+    const body = document.getElementById('log');
+    body.replaceChildren(...entries.map(e => h('tr', {},
+        td(e.created_at),
+        td(ruleName[e.rule_id] ?? '(deleted)'),
+        td(chName[e.channel_id] ?? '(deleted)'),
+        td(e.subject),
+        td(h('span', {class: e.status === 'sent' ? 'text-green-700' : 'text-red-700', title: e.error}, e.status)),
+    )));
+    if (!entries.length) body.replaceChildren(h('tr', {}, h('td', {colspan: 5, class: 'px-4 py-6 text-center text-sm text-gray-500'}, 'No notifications sent yet')));
+}
+
+function renderChannels() {
+    const body = document.getElementById('channels');
+    if (!channels.length) {
+        body.replaceChildren(h('tr', {}, h('td', {colspan: 4, class: 'px-4 py-6 text-center text-sm text-gray-500'}, 'No channels. Add one to receive alerts.')));
+        return;
+    }
+    body.replaceChildren(...channels.map(c => h('tr', {},
+        td(c.name), td(c.type), td(badge(c.enabled)),
+        h('td', {class: 'px-4 py-3 text-sm text-right whitespace-nowrap'},
+            btn('Test', () => guarded(async () => {
+                await api('POST', `channels/${c.id}/test`);
+                showError('');
+                alert('Test notification sent via "' + c.name + '"');
+            })),
+            btn('Edit', () => editChannel(c)),
+            btn(c.enabled ? 'Disable' : 'Enable', () => guarded(async () => { await api('PUT', `channels/${c.id}`, {...c, enabled: !c.enabled}); await load(); })),
+            btn('Delete', () => guarded(async () => {
+                if (!confirm(`Delete channel "${c.name}"?`)) return;
+                await api('DELETE', `channels/${c.id}`); await load();
+            }), 'text-red-600'),
+        ),
+    )));
+}
+
+function describeFilter(r) {
+    if (r.trigger === 'host_offline') return 'host: ' + r.host_pattern;
+    const types = r.service_types.length ? ' types: ' + r.service_types.map(t => SERVICE_TYPES[t] ?? t).join(', ') : '';
+    return `host: ${r.host_pattern}, service: ${r.service_pattern}${types}`;
+}
+
+function renderRules() {
+    const body = document.getElementById('rules');
+    if (!rules.length) {
+        body.replaceChildren(h('tr', {}, h('td', {colspan: 7, class: 'px-4 py-6 text-center text-sm text-gray-500'}, 'No rules. Without a rule nothing is sent.')));
+        return;
+    }
+    const chName = Object.fromEntries(channels.map(c => [c.id, c.name]));
+    body.replaceChildren(...rules.map(r => h('tr', {},
+        td(r.name),
+        td(r.trigger === 'host_offline' ? 'Host offline' : 'Service failure'),
+        td(describeFilter(r)),
+        td(`${r.hold_seconds}s / ${r.cooldown_seconds}s`),
+        td(r.channel_ids.map(id => chName[id] ?? '?').join(', ') || '(none)'),
+        td(badge(r.enabled)),
+        h('td', {class: 'px-4 py-3 text-sm text-right whitespace-nowrap'},
+            btn('Edit', () => editRule(r)),
+            btn(r.enabled ? 'Disable' : 'Enable', () => guarded(async () => { await api('PUT', `rules/${r.id}`, {enabled: !r.enabled}); await load(); })),
+            btn('Delete', () => guarded(async () => {
+                if (!confirm(`Delete rule "${r.name}"?`)) return;
+                await api('DELETE', `rules/${r.id}`); await load();
+            }), 'text-red-600'),
+        ),
+    )));
+}
+
+// ---- modal form ----
+
+const modal = document.getElementById('modal');
+let onSubmit = null;
+
+function openForm(title, fields, submit) {
+    document.getElementById('formTitle').textContent = title;
+    document.getElementById('formFields').replaceChildren(...fields);
+    document.getElementById('formError').classList.add('hidden');
+    onSubmit = submit;
+    modal.classList.remove('hidden');
+}
+const closeForm = () => modal.classList.add('hidden');
+document.getElementById('formCancel').addEventListener('click', closeForm);
+document.getElementById('form').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    try {
+        await onSubmit();
+        closeForm();
+        await load();
+    } catch (err) {
+        const e = document.getElementById('formError');
+        e.textContent = err.message;
+        e.classList.remove('hidden');
+    }
+});
+
+const inputCls = 'w-full px-3 py-2 border border-gray-300 rounded-md text-sm';
+function field(label, input, hint) {
+    return h('label', {class: 'block'},
+        h('span', {class: 'block text-sm font-medium text-gray-700 mb-1'}, label), input,
+        hint ? h('span', {class: 'block text-xs text-gray-500 mt-1'}, hint) : '');
+}
+const checkbox = (name, checked) => h('input', {type: 'checkbox', name, checked: !!checked, class: 'mr-2'});
+
+function editChannel(existing) {
+    const cfg = existing ? existing.config : {};
+    const name = h('input', {class: inputCls, name: 'name', value: existing ? existing.name : '', required: true});
+    const type = h('select', {class: inputCls, disabled: !!existing},
+        ...Object.keys(CHANNEL_FIELDS).map(t => h('option', {value: t, selected: existing && existing.type === t}, t)));
+    const enabled = checkbox('enabled', existing ? existing.enabled : true);
+    const dynamic = h('div', {class: 'space-y-3'});
+    const inputs = {};
+
+    const buildFields = () => {
+        dynamic.replaceChildren();
+        for (const f of CHANNEL_FIELDS[type.value]) {
+            let v = cfg[f.key] ?? f.def ?? '';
+            if (f.list && Array.isArray(v)) v = v.join(', ');
+            if (f.headers && v && typeof v === 'object') v = Object.entries(v).map(([k, val]) => `${k}: ${val}`).join('\n');
+            const input = f.textarea
+                ? h('textarea', {class: inputCls, rows: 3}, v)
+                : h('input', {class: inputCls, type: f.type || (f.secret ? 'password' : 'text'), value: v, autocomplete: 'off'});
+            inputs[f.key] = {f, input};
+            dynamic.append(field(f.label, input, f.secret && existing ? 'Shown masked; leave as is to keep the stored value.' : ''));
+        }
+    };
+    type.addEventListener('change', buildFields);
+    buildFields();
+
+    openForm(existing ? 'Edit channel' : 'Add channel', [
+        field('Name', name), field('Type', type), dynamic,
+        h('label', {class: 'flex items-center text-sm text-gray-700'}, enabled, 'Enabled'),
+    ], async () => {
+        const config = {};
+        for (const [key, {f, input}] of Object.entries(inputs)) {
+            const raw = input.value.trim();
+            if (f.type === 'number') config[key] = raw ? Number(raw) : 0;
+            else if (f.list) config[key] = raw.split(',').map(s => s.trim()).filter(Boolean);
+            else if (f.headers) {
+                config[key] = {};
+                for (const line of raw.split('\n')) {
+                    const i = line.indexOf(':');
+                    if (i > 0) config[key][line.slice(0, i).trim()] = line.slice(i + 1).trim();
+                }
+            } else config[key] = raw;
+        }
+        const body = {name: name.value, type: type.value, config, enabled: enabled.checked};
+        if (existing) await api('PUT', `channels/${existing.id}`, body);
+        else await api('POST', 'channels', body);
+    });
+}
+
+function editRule(existing) {
+    const r = existing || {name: '', enabled: true, trigger: 'service_failure', host_pattern: '*', service_pattern: '*',
+        service_types: [], hold_seconds: 30, cooldown_seconds: 0, notify_recovery: true, channel_ids: []};
+    const name = h('input', {class: inputCls, value: r.name, required: true});
+    const trigger = h('select', {class: inputCls},
+        h('option', {value: 'service_failure', selected: r.trigger === 'service_failure'}, 'Service failure'),
+        h('option', {value: 'host_offline', selected: r.trigger === 'host_offline'}, 'Host offline (no data for 5 poll intervals)'));
+    const host = h('input', {class: inputCls, value: r.host_pattern});
+    const service = h('input', {class: inputCls, value: r.service_pattern});
+    const typeBoxes = Object.entries(SERVICE_TYPES).map(([t, label]) => {
+        const cb = checkbox('t' + t, r.service_types.includes(Number(t)));
+        cb.dataset.type = t;
+        return h('label', {class: 'inline-flex items-center mr-4 text-sm text-gray-700'}, cb, label);
+    });
+    const serviceBlock = h('div', {class: 'space-y-3'},
+        field('Service name (glob)', service),
+        field('Service types', h('div', {}, ...typeBoxes), 'None selected means all types.'));
+    const syncTrigger = () => serviceBlock.classList.toggle('hidden', trigger.value === 'host_offline');
+    trigger.addEventListener('change', syncTrigger);
+    syncTrigger();
+
+    const hold = h('input', {class: inputCls, type: 'number', min: 0, value: r.hold_seconds});
+    const cooldown = h('input', {class: inputCls, type: 'number', min: 0, value: r.cooldown_seconds});
+    const recovery = checkbox('recovery', r.notify_recovery);
+    const enabled = checkbox('enabled', r.enabled);
+    const chBoxes = channels.map(c => {
+        const cb = checkbox('c' + c.id, r.channel_ids.includes(c.id));
+        cb.dataset.id = c.id;
+        return h('label', {class: 'flex items-center text-sm text-gray-700'}, cb, `${c.name} (${c.type})${c.enabled ? '' : ' - disabled'}`);
+    });
+
+    openForm(existing ? 'Edit rule' : 'Add rule', [
+        field('Name', name), field('Trigger', trigger),
+        field('Host name (glob, * and ?)', host),
+        serviceBlock,
+        field('Hold (seconds)', hold, 'Failures in this window are grouped into one message, across hosts.'),
+        field('Cooldown (seconds)', cooldown),
+        field('Send to', h('div', {class: 'space-y-1'}, ...(chBoxes.length ? chBoxes : [h('span', {class: 'text-sm text-gray-500'}, 'Create a channel first.')]))),
+        h('label', {class: 'flex items-center text-sm text-gray-700'}, recovery, 'Notify on recovery'),
+        h('label', {class: 'flex items-center text-sm text-gray-700'}, enabled, 'Enabled'),
+    ], async () => {
+        const body = {
+            name: name.value, enabled: enabled.checked, trigger: trigger.value,
+            host_pattern: host.value.trim() || '*',
+            service_pattern: service.value.trim() || '*',
+            service_types: typeBoxes.map(l => l.querySelector('input')).filter(cb => cb.checked).map(cb => Number(cb.dataset.type)),
+            hold_seconds: Number(hold.value) || 0,
+            cooldown_seconds: Number(cooldown.value) || 0,
+            notify_recovery: recovery.checked,
+            channel_ids: chBoxes.map(l => l.querySelector('input')).filter(cb => cb.checked).map(cb => Number(cb.dataset.id)),
+        };
+        if (existing) await api('PUT', `rules/${existing.id}`, body);
+        else await api('POST', 'rules', body);
+    });
+}
+
+document.getElementById('addChannel').addEventListener('click', () => editChannel(null));
+document.getElementById('addRule').addEventListener('click', () => editRule(null));
+document.getElementById('refreshLog').addEventListener('click', () => guarded(loadLog));
+guarded(load);
+</script>
+</body>
+</html>

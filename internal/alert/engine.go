@@ -178,11 +178,11 @@ func (e *Engine) observe(hostID string, st *parser.MonitStatus) error {
 				ON CONFLICT(host_id, service_name) DO UPDATE SET
 					service_type = excluded.service_type, failed = 1, since = excluded.since,
 					notified = excluded.notified, message = excluded.message`,
-				hostID, svc.Name, svc.Type, since, notified, svc.StatusMessage())
+				hostID, svc.Name, svc.Type, since, notified, describeFailure(svc))
 		case failed:
 			// still failing: refresh the message only
 			_, err = tx.Exec(`UPDATE alert_state SET message = ? WHERE host_id = ? AND service_name = ?`,
-				svc.StatusMessage(), hostID, svc.Name)
+				describeFailure(svc), hostID, svc.Name)
 		case prev != nil && prev.Failed && svc.Monitor == 0:
 			// unmonitored by the operator: close the incident without a recovery message
 			_, err = tx.Exec(`UPDATE alert_state SET failed = 0, notified = 0 WHERE host_id = ? AND service_name = ?`,

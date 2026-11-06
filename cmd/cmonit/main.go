@@ -541,6 +541,9 @@ func main() {
 	// Used to display and filter hosts by group
 	webMux.HandleFunc("/api/hostgroups", web.HandleHostGroupsAPI)
 
+	// /alerts is the alert configuration page
+	webMux.HandleFunc("/alerts", web.HandleAlertsPage)
+
 	// /api/alerts/ manages alert channels and rules and exposes the alert log
 	webMux.HandleFunc("/api/alerts/", web.HandleAlertsAPI)
 

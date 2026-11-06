@@ -119,6 +119,7 @@ Migrations are additive SQL blocks in `schema.go:MigrateSchema()`. Bump `current
 | GET    | /api/availability                 | HandleAvailabilityAPI        |
 | POST   | /api/host/description             | HandleUpdateDescription      |
 | GET    | /api/hostgroups                   | HandleHostGroupsAPI          |
+| GET    | /alerts                           | HandleAlertsPage (alerts_api.go, templates/alerts.html) |
 | *      | /api/alerts/...                   | HandleAlertsAPI (alerts_api.go) |
 
 `health.go` contains only internal helper functions (`CalculateHostHealth`, `FormatTimeSince`, etc.) — no HTTP endpoint.

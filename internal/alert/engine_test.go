@@ -307,3 +307,22 @@ func TestChannelSecretsMaskedAndPreserved(t *testing.T) {
 		t.Fatalf("stored = %s", stored.Config)
 	}
 }
+
+func TestDescribeFailure(t *testing.T) {
+	cases := []struct {
+		name string
+		svc  parser.Service
+		want string
+	}{
+		{"process missing", parser.Service{Status: 0x200}, "does not exist"},
+		{"program", parser.Service{Status: 0x200000, Program: &parser.ProgramInfo{Status: 1, Output: "sensor timeout\nsecond line"}},
+			"status failed; exit status 1: sensor timeout"},
+		{"several bits", parser.Service{Status: 0x2 | 0x20}, "resource limit matched, connection failed"},
+		{"unknown bit only", parser.Service{Status: 0x80000000}, "failed (status 2147483648)"},
+	}
+	for _, c := range cases {
+		if got := describeFailure(&c.svc); got != c.want {
+			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
+		}
+	}
+}

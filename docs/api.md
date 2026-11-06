@@ -101,6 +101,8 @@ curl -X POST http://localhost:3000/api/host/description \
 
 ### Alerting: /api/alerts/
 
+The web UI for this API is the page `/alerts`.
+
 JSON in and out. `POST`/`PUT` require `Content-Type: application/json`. Errors: `400` invalid field, `404` unknown id, `409` duplicate name.
 
 | Method | Path | Purpose |

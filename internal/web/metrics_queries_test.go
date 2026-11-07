@@ -2,11 +2,14 @@ package web
 
 import (
 	"database/sql"
+	"encoding/json"
+	"net/http/httptest"
 	"path/filepath"
 	"testing"
 	"time"
 
 	cdb "github.com/ocochard/cmonit/internal/db"
+	"github.com/ocochard/cmonit/internal/parser"
 )
 
 func setupMetricsDB(t *testing.T) *sql.DB {
@@ -140,4 +143,49 @@ func contains(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+// The M/Monit status summary computes host age with strftime on last_seen. It
+// used to subtract the raw text, which counted every host as red.
+func TestMMonitStatusSummaryCountsHostsByAge(t *testing.T) {
+	d := setupMetricsDB(t) // inserts host h1 with a current last_seen; replaced below
+	ingest := func(id, name string) {
+		st := &parser.MonitStatus{
+			Server:   parser.Server{ID: id, LocalHostname: name, Incarnation: 1, Uptime: 100, Poll: 30, HTTPD: parser.HTTPDInfo{Address: "127.0.0.1", Port: 2812}},
+			Platform: parser.Platform{Name: "FreeBSD", Release: "16", Version: "x", Machine: "amd64", CPU: 2, Memory: 1 << 20, Swap: 1 << 20},
+		}
+		if err := cdb.StoreMonitStatus(d, st); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := d.Exec(`DELETE FROM hosts`); err != nil {
+		t.Fatal(err)
+	}
+	ingest("fresh", "web01")
+	ingest("yellow", "web02")
+	ingest("silent", "web03")
+	for id, ago := range map[string]string{"yellow": "-100 seconds", "silent": "-1 hours"} {
+		if _, err := d.Exec(`UPDATE hosts SET last_seen = strftime('%Y-%m-%d %H:%M:%S', 'now', ?) WHERE id = ?`, ago, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rec := httptest.NewRecorder()
+	HandleMMV2StatusHostsSummary(rec, httptest.NewRequest("GET", "/api/2/status/hosts/summary", nil))
+	var body struct {
+		Summary []struct {
+			Label string `json:"label"`
+			Data  int    `json:"data"`
+		} `json:"summary"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("%v: %s", err, rec.Body.String())
+	}
+	got := map[string]int{}
+	for _, s := range body.Summary {
+		got[s.Label] = s.Data
+	}
+	if got["green"] != 1 || got["orange"] != 1 || got["red"] != 1 {
+		t.Fatalf("summary = %v, want one host of each color", got)
+	}
 }

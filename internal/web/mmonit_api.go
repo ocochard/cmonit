@@ -830,11 +830,10 @@ func HandleMMV2StatusHostsGet(w http.ResponseWriter, r *http.Request) {
 func HandleMMV2StatusHostsSummary(w http.ResponseWriter, r *http.Request) {
 	const query = `
 		SELECT
-			SUM(CASE WHEN (strftime('%s','now') - last_seen) < poll_interval * 2 THEN 1 ELSE 0 END) AS green,
-			SUM(CASE WHEN (strftime('%s','now') - last_seen) >= poll_interval * 2
-			          AND (strftime('%s','now') - last_seen) < poll_interval * 5 THEN 1 ELSE 0 END) AS orange,
-			SUM(CASE WHEN (strftime('%s','now') - last_seen) >= poll_interval * 5 THEN 1 ELSE 0 END) AS red
-		FROM hosts
+			COALESCE(SUM(CASE WHEN age < poll_interval * 2 THEN 1 ELSE 0 END), 0) AS green,
+			COALESCE(SUM(CASE WHEN age >= poll_interval * 2 AND age < poll_interval * 5 THEN 1 ELSE 0 END), 0) AS orange,
+			COALESCE(SUM(CASE WHEN age >= poll_interval * 5 THEN 1 ELSE 0 END), 0) AS red
+		FROM (SELECT poll_interval, CAST(strftime('%s','now') AS INTEGER) - CAST(strftime('%s', last_seen) AS INTEGER) AS age FROM hosts)
 	`
 	var green, orange, red int
 	err := db.QueryRow(query).Scan(&green, &orange, &red)

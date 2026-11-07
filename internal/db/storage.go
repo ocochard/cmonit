@@ -34,6 +34,13 @@ type queryer interface {
 	Query(query string, args ...interface{}) (*sql.Rows, error)
 }
 
+// lastSeenFormat is how hosts.last_seen is stored: UTC text that SQLite's
+// date functions parse. A time.Time written by the driver becomes Go's
+// String() form ("... +0000 UTC m=+123.4"), which strftime() turns into NULL,
+// so everything computed from it (availability, DeleteHost, the M/Monit
+// summary) silently failed.
+const lastSeenFormat = "2006-01-02 15:04:05"
+
 // StoreHost saves or updates a host record in the database.
 //
 // This function is called every time we receive status data from a Monit agent.
@@ -216,7 +223,7 @@ func StoreHost(db queryer, server *parser.Server, platform *parser.Platform, sys
 		boottime,
 		server.Uptime,
 		server.Poll,
-		now,
+		now.UTC().Format(lastSeenFormat),
 		now,  // created_at for new hosts
 		"",   // description for new hosts (empty)
 	)
@@ -518,6 +525,10 @@ func PruneOldData(db *sql.DB, retentionDays int) error {
 	eventsResult, err := db.Exec("DELETE FROM events WHERE created_at < ?", cutoff)
 	if err != nil {
 		return fmt.Errorf("failed to prune events: %w", err)
+	}
+
+	if _, err := db.Exec("DELETE FROM host_availability WHERE timestamp < ?", cutoff.Unix()); err != nil {
+		return fmt.Errorf("failed to prune host_availability: %w", err)
 	}
 
 	if _, err := db.Exec("DELETE FROM alert_log WHERE created_at < ?", cutoff); err != nil {

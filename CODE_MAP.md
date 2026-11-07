@@ -11,7 +11,7 @@ cmd/cmonit/main.go          Entry point, two HTTP servers, daemon mode, signal h
 internal/
   config/config.go          TOML config loader with CLI override priority
   db/
-    schema.go               SQLite schema definition + incremental migrations (v1→v17)
+    schema.go               SQLite schema definition + incremental migrations (v1→v18)
     storage.go              All persistence logic (insert/update/query helpers)
   parser/
     xml.go                  Monit XML → Go structs, gzip + charset handling

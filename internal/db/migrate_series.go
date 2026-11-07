@@ -179,3 +179,37 @@ func reclaimSpace(db *sql.DB) {
 	db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
 	log.Printf("[INFO] VACUUM finished in %s", time.Since(t).Round(time.Second))
 }
+
+// normalizeHostLastSeen rewrites hosts.last_seen into lastSeenFormat. Rows
+// that cannot be parsed are left alone and logged.
+func normalizeHostLastSeen(db *sql.DB) error {
+	rows, err := db.Query(`SELECT id, last_seen FROM hosts`)
+	if err != nil {
+		return err
+	}
+	type fix struct{ id, text string }
+	var fixes []fix
+	for rows.Next() {
+		var id string
+		var raw any
+		if err := rows.Scan(&id, &raw); err != nil {
+			rows.Close()
+			return err
+		}
+		t, ok := parseStoredTime(raw)
+		if !ok {
+			log.Printf("[WARN] Host %s: unreadable last_seen %v, left unchanged", id, raw)
+			continue
+		}
+		fixes = append(fixes, fix{id, t.UTC().Format(lastSeenFormat)})
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, f := range fixes {
+		if _, err := db.Exec(`UPDATE hosts SET last_seen = ? WHERE id = ?`, f.text, f.id); err != nil {
+			return err
+		}
+	}
+	return nil
+}

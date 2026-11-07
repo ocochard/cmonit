@@ -31,7 +31,7 @@ import (
 
 // currentSchemaVersion is the current database schema version.
 // Increment this when making schema changes that require migration.
-const currentSchemaVersion = 17
+const currentSchemaVersion = 18
 
 // SQL schema for the cmonit database
 //
@@ -1512,6 +1512,22 @@ func migrateSchema(db *sql.DB, fromVersion, toVersion int) error {
 				return err
 			}
 			log.Printf("[INFO] Successfully migrated to schema version 17")
+
+		case 17:
+			// hosts.last_seen used to be stored as Go's time.Time text, which
+			// SQLite cannot parse; see lastSeenFormat.
+			log.Printf("[INFO] Migrating from v17 to v18: Normalizing hosts.last_seen")
+
+			if err := normalizeHostLastSeen(db); err != nil {
+				return fmt.Errorf("migration v17->v18 failed: %w", err)
+			}
+
+			fromVersion = 18
+			err := setSchemaVersion(db, fromVersion)
+			if err != nil {
+				return err
+			}
+			log.Printf("[INFO] Successfully migrated to schema version 18")
 
 		default:
 			return fmt.Errorf("no migration path from version %d", fromVersion)

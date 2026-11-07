@@ -11,7 +11,7 @@ cmd/cmonit/main.go          Entry point, two HTTP servers, daemon mode, signal h
 internal/
   config/config.go          TOML config loader with CLI override priority
   db/
-    schema.go               SQLite schema definition + incremental migrations (v1→v16)
+    schema.go               SQLite schema definition + incremental migrations (v1→v17)
     storage.go              All persistence logic (insert/update/query helpers)
   parser/
     xml.go                  Monit XML → Go structs, gzip + charset handling
@@ -77,7 +77,8 @@ Background goroutine every 60 s: `RecordAvailabilityForAllHosts()`.
 | schema_version        | Migration tracking                                |
 | hosts                 | One row per Monit agent (hostname UNIQUE)         |
 | services              | One row per (host, service) pair                  |
-| metrics               | Time-series generic metrics (load, CPU, mem, …)   |
+| metric_series         | Dictionary: (host, service, type, name) -> id     |
+| metrics               | (series_id, ts, value), WITHOUT ROWID, unix seconds |
 | events                | State-change history                              |
 | filesystem_metrics    | Disk space, inode, I/O per mount                  |
 | network_metrics       | Link state, speed, traffic per interface          |

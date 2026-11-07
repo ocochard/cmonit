@@ -188,113 +188,65 @@ func HandleMetricsAPI(w http.ResponseWriter, r *http.Request) {
 func getMetricsForService(hostID, service string, startTime, endTime time.Time) ([]MetricSeries, error) {
 	// Query all metrics for this service in the time range
 	//
-	// ORDER BY collected_at lets idx_metrics_host_service_time return the rows
-	// already ordered, with no sort. Each series is built in a map below, so
-	// only the time order within a series matters.
-	const query = `
-		SELECT metric_type, metric_name, value, collected_at
-		FROM metrics
+	// One query for the service's series, then one primary-key range scan per
+	// series (rows come back in time order, no sort).
+	seriesRows, err := db.Query(`
+		SELECT id, metric_type, metric_name
+		FROM metric_series
 		WHERE host_id = ? AND service_name = ?
-		  AND collected_at BETWEEN ? AND ?
-		ORDER BY collected_at
-	`
-
-	// Execute query with parameters
-	rows, err := db.Query(query, hostID, service, startTime, endTime)
+		ORDER BY metric_type, metric_name`, hostID, service)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	// Map to collect points by metric
-	//
-	// Key: "metric_type:metric_name" (e.g., "cpu:user")
-	// Value: Array of data points for that metric
-	//
-	// map[string][]MetricPoint creates a map where:
-	// - Keys are strings
-	// - Values are slices of MetricPoint
-	metricsMap := make(map[string][]MetricPoint)
-
-	// Also track the order and type/name for each metric
-	// We need this to build the final MetricSeries array
-	type metricKey struct {
-		metricType string
-		metricName string
+	type seriesInfo struct {
+		id                     int64
+		metricType, metricName string
 	}
-	metricKeys := make(map[string]metricKey)
-
-	// Read all rows
-	for rows.Next() {
-		var metricType, metricName string
-		var value float64
-		var collectedAt time.Time
-
-		err := rows.Scan(&metricType, &metricName, &value, &collectedAt)
-		if err != nil {
+	var infos []seriesInfo
+	for seriesRows.Next() {
+		var si seriesInfo
+		if err := seriesRows.Scan(&si.id, &si.metricType, &si.metricName); err != nil {
+			seriesRows.Close()
 			return nil, err
 		}
-
-		// Create a unique key for this metric
-		key := metricType + ":" + metricName
-
-		// Store the key info (for building MetricSeries later)
-		if _, exists := metricKeys[key]; !exists {
-			metricKeys[key] = metricKey{
-				metricType: metricType,
-				metricName: metricName,
-			}
-		}
-
-		// Add this point to the metric's data
-		metricsMap[key] = append(metricsMap[key], MetricPoint{
-			Timestamp: collectedAt,
-			Value:     value,
-		})
+		infos = append(infos, si)
 	}
-
-	if err = rows.Err(); err != nil {
+	if err := seriesRows.Close(); err != nil {
 		return nil, err
 	}
 
-	// Convert map to array of MetricSeries
-	//
-	// We need to convert from:
-	//   map[string][]MetricPoint
-	// To:
-	//   []MetricSeries
 	var result []MetricSeries
-
-	for key, points := range metricsMap {
-		// Get the type and name for this metric
-		mk := metricKeys[key]
-
-		// Build arrays of timestamps and values
-		//
-		// JavaScript charts need parallel arrays:
-		// - timestamps: ["2025-11-22T10:00:00Z", "2025-11-22T10:01:00Z", ...]
-		// - values: [10.5, 12.3, ...]
-		timestamps := make([]string, len(points))
-		values := make([]float64, len(points))
-
-		for i, point := range points {
-			// Format timestamp as ISO 8601 (JavaScript-friendly)
-			// time.RFC3339 is the constant for ISO 8601 format
-			timestamps[i] = point.Timestamp.Format(time.RFC3339)
-			values[i] = point.Value
+	for _, si := range infos {
+		rows, err := db.Query(`SELECT ts, value FROM metrics WHERE series_id = ? AND ts BETWEEN ? AND ? ORDER BY ts`,
+			si.id, startTime.Unix(), endTime.Unix())
+		if err != nil {
+			return nil, err
 		}
-
-		// Create MetricSeries for this metric
-		series := MetricSeries{
-			Name:       mk.metricName,
-			Type:       mk.metricType,
+		var timestamps []string
+		var values []float64
+		for rows.Next() {
+			var ts int64
+			var value float64
+			if err := rows.Scan(&ts, &value); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			timestamps = append(timestamps, time.Unix(ts, 0).Format(time.RFC3339))
+			values = append(values, value)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, err
+		}
+		if len(values) == 0 {
+			continue
+		}
+		result = append(result, MetricSeries{
+			Name:       si.metricName,
+			Type:       si.metricType,
 			Timestamps: timestamps,
 			Values:     values,
-		}
-
-		result = append(result, series)
+		})
 	}
-
 	return result, nil
 }
 

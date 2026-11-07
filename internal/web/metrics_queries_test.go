@@ -106,16 +106,12 @@ func TestGraphSeriesAreChronologicalWithinWindow(t *testing.T) {
 	}
 }
 
-// The graph query must use idx_metrics_host_service_time for the time range
-// and return rows in index order, with no sort step.
-func TestGraphQueryPlanUsesTimeIndexWithoutSort(t *testing.T) {
+// The per-series graph query must be a primary-key range scan, already in
+// time order, with no sort.
+func TestGraphQueryPlanIsPrimaryKeyRangeWithoutSort(t *testing.T) {
 	d := setupMetricsDB(t)
 	rows, err := d.Query(`EXPLAIN QUERY PLAN
-		SELECT metric_type, metric_name, value, collected_at
-		FROM metrics
-		WHERE host_id = ? AND service_name = ?
-		  AND collected_at BETWEEN ? AND ?
-		ORDER BY collected_at`, "h1", "web01", time.Now(), time.Now())
+		SELECT ts, value FROM metrics WHERE series_id = ? AND ts BETWEEN ? AND ? ORDER BY ts`, 1, 0, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,8 +125,8 @@ func TestGraphQueryPlanUsesTimeIndexWithoutSort(t *testing.T) {
 		}
 		plan += detail + "\n"
 	}
-	if want := "idx_metrics_host_service_time"; !contains(plan, want) {
-		t.Fatalf("plan does not use %s:\n%s", want, plan)
+	if !contains(plan, "USING PRIMARY KEY (series_id=? AND ts>? AND ts<?)") {
+		t.Fatalf("plan is not a primary key range scan:\n%s", plan)
 	}
 	if contains(plan, "TEMP B-TREE") {
 		t.Fatalf("plan sorts:\n%s", plan)

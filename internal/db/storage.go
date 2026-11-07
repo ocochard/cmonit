@@ -510,7 +510,7 @@ func PruneOldData(db *sql.DB, retentionDays int) error {
 
 	cutoff := time.Now().AddDate(0, 0, -retentionDays)
 
-	metricsResult, err := db.Exec("DELETE FROM metrics WHERE collected_at < ?", cutoff)
+	metricsDeleted, err := pruneMetrics(db, cutoff.Unix())
 	if err != nil {
 		return fmt.Errorf("failed to prune metrics: %w", err)
 	}
@@ -525,12 +525,52 @@ func PruneOldData(db *sql.DB, retentionDays int) error {
 	}
 
 	if debugMode {
-		metricsDeleted, _ := metricsResult.RowsAffected()
 		eventsDeleted, _ := eventsResult.RowsAffected()
 		log.Printf("[DEBUG] Pruned %d metrics rows and %d events rows older than %s", metricsDeleted, eventsDeleted, cutoff.Format(time.RFC3339))
 	}
 
 	return nil
+}
+
+// pruneMetrics deletes points older than cutoff (unix seconds), series by
+// series: the table has no time index, and each per-series delete is a range
+// on the primary key. Series left without points are removed (they are
+// recreated if the metric is reported again).
+func pruneMetrics(db *sql.DB, cutoff int64) (int64, error) {
+	rows, err := db.Query(`SELECT id FROM metric_series`)
+	if err != nil {
+		return 0, err
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+
+	var deleted int64
+	for _, id := range ids {
+		res, err := db.Exec(`DELETE FROM metrics WHERE series_id = ? AND ts < ?`, id, cutoff)
+		if err != nil {
+			return deleted, err
+		}
+		n, _ := res.RowsAffected()
+		deleted += n
+		if n > 0 {
+			_, err := db.Exec(`DELETE FROM metric_series WHERE id = ?
+				AND NOT EXISTS (SELECT 1 FROM metrics WHERE series_id = metric_series.id)`, id)
+			if err != nil {
+				return deleted, err
+			}
+		}
+	}
+	return deleted, nil
 }
 
 // StoreService saves or updates a service record in the database.
@@ -659,44 +699,25 @@ func StoreService(db queryer, hostID string, service *parser.Service) error {
 //   StoreMetric(db, "host123", "system", "cpu", "user", 25.5, time.Now())
 //   StoreMetric(db, "host123", "system", "memory", "percent", 45.2, time.Now())
 func StoreMetric(db queryer, hostID, serviceName, metricType, metricName string, value float64, collectedAt time.Time) error {
-	// SQL query to insert a metric data point
-	//
-	// Note: We use INSERT (not INSERT OR REPLACE) because:
-	// - Each metric is a new data point in time
-	// - We want to keep all historical values
-	// - Time-series data is append-only (we don't update old values)
-	const query = `
-		INSERT INTO metrics (
-			host_id,
-			service_name,
-			metric_type,
-			metric_name,
-			value,
-			collected_at
-		) VALUES (?, ?, ?, ?, ?, ?)
+	// The series row is created on first use; a second point in the same
+	// second replaces the first (the primary key is series_id, ts).
+	const insertSeries = `
+		INSERT OR IGNORE INTO metric_series (host_id, service_name, metric_type, metric_name)
+		VALUES (?, ?, ?, ?)
+	`
+	const insertPoint = `
+		INSERT OR REPLACE INTO metrics (series_id, ts, value)
+		VALUES ((SELECT id FROM metric_series
+		         WHERE host_id = ? AND service_name = ? AND metric_type = ? AND metric_name = ?), ?, ?)
 	`
 
-	// Execute the query
-	_, err := db.Exec(
-		query,
-		hostID,
-		serviceName,
-		metricType,
-		metricName,
-		value,
-		collectedAt,
-	)
-
-	if err != nil {
-		// Don't log every metric error (would be very noisy)
-		// Just return the error
+	if _, err := db.Exec(insertSeries, hostID, serviceName, metricType, metricName); err != nil {
+		return fmt.Errorf("failed to store metric series: %w", err)
+	}
+	if _, err := db.Exec(insertPoint, hostID, serviceName, metricType, metricName, collectedAt.Unix(), value); err != nil {
 		return fmt.Errorf("failed to store metric: %w", err)
 	}
 
-	// Keep the latest_metrics cache current so status-page reads don't need
-	// to scan metrics history. The WHERE guard drops out-of-order writes
-	// (an older collected_at arriving after a newer one) instead of letting
-	// them clobber the cached value.
 	const upsertLatest = `
 		INSERT INTO latest_metrics (
 			host_id, service_name, metric_type, metric_name, value, collected_at
@@ -1736,11 +1757,15 @@ func DeleteHost(db *sql.DB, hostID string) (*DeleteHostStats, error) {
 	stats.Services, _ = result.RowsAffected()
 
 	// Delete metrics
-	result, err = tx.Exec("DELETE FROM metrics WHERE host_id = ?", hostID)
+	result, err = tx.Exec(`DELETE FROM metrics WHERE series_id IN (SELECT id FROM metric_series WHERE host_id = ?)`, hostID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to delete metrics: %w", err)
 	}
 	stats.Metrics, _ = result.RowsAffected()
+
+	if _, err = tx.Exec("DELETE FROM metric_series WHERE host_id = ?", hostID); err != nil {
+		return nil, fmt.Errorf("failed to delete metric series: %w", err)
+	}
 
 	// Delete filesystem_metrics
 	result, err = tx.Exec("DELETE FROM filesystem_metrics WHERE host_id = ?", hostID)

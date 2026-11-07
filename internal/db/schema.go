@@ -31,7 +31,7 @@ import (
 
 // currentSchemaVersion is the current database schema version.
 // Increment this when making schema changes that require migration.
-const currentSchemaVersion = 16
+const currentSchemaVersion = 17
 
 // SQL schema for the cmonit database
 //
@@ -178,79 +178,43 @@ const (
 		UNIQUE(host_id, name)
 	);`
 
-	// createMetricsTable creates the metrics table (time-series data)
+	// createMetricSeriesTable creates the series dictionary.
 	//
-	// This is the largest table - it stores historical metrics for graphing.
-	// Every 30 seconds (or whatever interval Monit is configured for),
-	// we insert new metrics for each service.
-	//
-	// Columns:
-	//   - id: Auto-incrementing integer
-	//   - host_id: Which host this metric is from
-	//   - service_name: Which service this metric is for
-	//   - metric_type: Category of metric (e.g., "cpu", "memory", "disk")
-	//   - metric_name: Specific metric (e.g., "user", "system", "percent")
-	//   - value: The numeric value
-	//   - collected_at: When Monit collected this data point
-	//
-	// Example rows:
-	//   host123 | system | cpu     | user    | 15.2 | 2025-11-22 20:30:00
-	//   host123 | system | cpu     | system  | 8.1  | 2025-11-22 20:30:00
-	//   host123 | system | memory  | percent | 45.6 | 2025-11-22 20:30:00
-	//
-	// Indexes:
-	// - idx_metrics_lookup: Fast queries by (host, service, metric, time)
-	// - idx_metrics_time: Fast queries by time (for cleanup)
-	//
-	// Why two indexes?
-	// - Lookups are for graphing (show CPU for host X from time A to B)
-	// - Time index is for deleting old data (cleanup metrics older than 30 days)
-	createMetricsTable = `
-	CREATE TABLE IF NOT EXISTS metrics (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
+	// A series is one (host, service, metric_type, metric_name) combination,
+	// for example "web01 / system / cpu / user". There are a few hundred of
+	// them, so the long strings are stored once here instead of in every
+	// metrics row (that repetition was about 90% of the old table's size).
+	createMetricSeriesTable = `
+	CREATE TABLE IF NOT EXISTS metric_series (
+		id INTEGER PRIMARY KEY,
 		host_id TEXT NOT NULL,
 		service_name TEXT NOT NULL,
 		metric_type TEXT NOT NULL,
 		metric_name TEXT NOT NULL,
-		value REAL NOT NULL,
-		collected_at DATETIME NOT NULL,
-		FOREIGN KEY (host_id) REFERENCES hosts(id) ON DELETE CASCADE
+		UNIQUE (host_id, service_name, metric_type, metric_name)
 	);`
 
-	// createMetricsIndexes creates indexes for fast metrics queries
+	// createMetricsTable creates the metrics table (time-series data).
 	//
-	// Indexes are like a book's index - they help find data quickly.
-	// Without indexes, SQLite must scan every row (slow for large tables).
-	// With indexes, SQLite can jump directly to relevant rows (fast!).
+	// This is the largest table: one row per metric per Monit cycle. The
+	// primary key is the table itself (WITHOUT ROWID), so a row is about 20
+	// bytes and there are no secondary indexes:
+	//   - graphs read one series over a time range: a primary key range scan
+	//     that already returns the rows in time order
+	//   - pruning deletes per series by the same key (see PruneOldData)
 	//
-	// Trade-offs:
-	// - Faster queries (good!)
-	// - Slower inserts (needs to update index - but still fast enough)
-	// - More disk space (index takes space - but worth it)
+	//   - series_id: metric_series.id
+	//   - ts: when Monit collected the point, unix seconds
+	//   - value: the numeric value
 	//
-	// idx_metrics_lookup: Optimizes queries like:
-	//   "Show me CPU metrics for host123's system service from 1pm to 2pm"
-	//
-	// idx_metrics_time: Optimizes queries like:
-	//   "Delete all metrics older than 30 days"
-	//
-	// idx_metrics_host_service_time: Optimizes the graph query, which filters
-	// by host, service and a time window and reads the rows in time order.
-	// idx_metrics_lookup cannot use the time bound (metric_type and
-	// metric_name sit between service_name and collected_at in its key), so
-	// that query scanned every row of the service whatever the window.
-	//
-	// Latest-value reads (status page, M/Monit CPU and memory, system metrics
-	// on the host page) use latest_metrics, not indexes on this table. Two
-	// metric_type-led covering indexes used to serve them; they were 2.8 GB of
-	// a 5.5 GB database and were dropped in schema v16.
-	createMetricsIndexes = `
-	CREATE INDEX IF NOT EXISTS idx_metrics_lookup
-		ON metrics(host_id, service_name, metric_type, metric_name, collected_at);
-	CREATE INDEX IF NOT EXISTS idx_metrics_host_service_time
-		ON metrics(host_id, service_name, collected_at);
-	CREATE INDEX IF NOT EXISTS idx_metrics_time
-		ON metrics(collected_at);`
+	// A second point with the same (series_id, ts) replaces the first.
+	createMetricsTable = `
+	CREATE TABLE IF NOT EXISTS metrics (
+		series_id INTEGER NOT NULL,
+		ts INTEGER NOT NULL,
+		value REAL NOT NULL,
+		PRIMARY KEY (series_id, ts)
+	) WITHOUT ROWID;`
 
 	// createLatestMetricsTable creates a cache of each series' most recent
 	// value, upserted on every StoreMetric call.
@@ -943,18 +907,17 @@ func InitDB(dbPath string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to create services table: %w", err)
 	}
 
-	// Create metrics table
+	// Create the metric series dictionary and the metrics table
+	_, err = db.Exec(createMetricSeriesTable)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to create metric_series table: %w", err)
+	}
+
 	_, err = db.Exec(createMetricsTable)
 	if err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to create metrics table: %w", err)
-	}
-
-	// Create metrics indexes (for fast queries)
-	_, err = db.Exec(createMetricsIndexes)
-	if err != nil {
-		db.Close()
-		return nil, fmt.Errorf("failed to create metrics indexes: %w", err)
 	}
 
 	// Create latest_metrics table (cache of each series' most recent value).
@@ -1517,8 +1480,7 @@ func migrateSchema(db *sql.DB, fromVersion, toVersion int) error {
 		case 15:
 			// The two indexes served only the latest CPU/memory lookups, which now
 			// read latest_metrics. Dropping them freed about half of a 5.5 GB database.
-			// idx_metrics_host_service_time is created by createMetricsIndexes after
-			// this migration; on a large table that build runs at startup.
+			// (v17 later replaced the whole metrics table and its indexes.)
 			log.Printf("[INFO] Migrating from v15 to v16: Dropping unused metrics indexes")
 
 			for _, name := range []string{"idx_metrics_type_host", "idx_metrics_type_name_host"} {
@@ -1533,6 +1495,23 @@ func migrateSchema(db *sql.DB, fromVersion, toVersion int) error {
 				return err
 			}
 			log.Printf("[INFO] Successfully migrated to schema version 16")
+
+		case 16:
+			// metrics moves to a series dictionary plus a clustered (series_id, ts)
+			// table with integer timestamps; see migrateMetricsToSeries. This can
+			// take minutes on a large database and runs before the servers start.
+			log.Printf("[INFO] Migrating from v16 to v17: Converting metrics to series table with integer timestamps")
+
+			if err := migrateMetricsToSeries(db); err != nil {
+				return fmt.Errorf("migration v16->v17 failed: %w", err)
+			}
+
+			fromVersion = 17
+			err := setSchemaVersion(db, fromVersion)
+			if err != nil {
+				return err
+			}
+			log.Printf("[INFO] Successfully migrated to schema version 17")
 
 		default:
 			return fmt.Errorf("no migration path from version %d", fromVersion)

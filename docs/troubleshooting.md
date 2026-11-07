@@ -19,40 +19,42 @@ This document provides troubleshooting tips, diagnostic commands, and solutions 
 
 cmonit uses SQLite for data storage. You can query the database directly for troubleshooting.
 
-**Database location**: `/var/run/cmonit/cmonit.db` (default)
+**Database location**: `/var/db/cmonit/cmonit.db` (default)
+
+Do not keep the database under `/var/run`. FreeBSD's `cleanvar` rc script deletes every file there at boot, so a reboot silently starts an empty database (history, alert rules and channels lost). Versions before schema 16 defaulted to `/var/run/cmonit/cmonit.db`. To move an existing database: stop cmonit, `mv` the `cmonit.db`, `-wal` and `-shm` files into `/var/db/cmonit/` (owned by the cmonit user, mode 750), set `cmonit_db="/var/db/cmonit/cmonit.db"` in `/etc/rc.conf` (or `database` in `cmonit.conf`), and start it. cmonit logs a warning at startup when the database path is under `/var/run`.
 
 ### List All Hosts
 
 **Simple list of hostnames:**
 ```bash
-sqlite3 /var/run/cmonit/cmonit.db "SELECT hostname FROM hosts ORDER BY hostname"
+sqlite3 /var/db/cmonit/cmonit.db "SELECT hostname FROM hosts ORDER BY hostname"
 ```
 
 **With OS information:**
 ```bash
-sqlite3 /var/run/cmonit/cmonit.db "SELECT hostname, os_name, last_seen FROM hosts ORDER BY hostname"
+sqlite3 /var/db/cmonit/cmonit.db "SELECT hostname, os_name, last_seen FROM hosts ORDER BY hostname"
 ```
 
 **Detailed view with IDs:**
 ```bash
-sqlite3 /var/run/cmonit/cmonit.db "SELECT hostname, os_name, datetime(last_seen), id FROM hosts ORDER BY hostname"
+sqlite3 /var/db/cmonit/cmonit.db "SELECT hostname, os_name, datetime(last_seen), id FROM hosts ORDER BY hostname"
 ```
 
 **With creation and last seen timestamps:**
 ```bash
-sqlite3 /var/run/cmonit/cmonit.db "SELECT id, hostname, os_name, created_at, last_seen FROM hosts ORDER BY hostname"
+sqlite3 /var/db/cmonit/cmonit.db "SELECT id, hostname, os_name, created_at, last_seen FROM hosts ORDER BY hostname"
 ```
 
 ### Check Host Status
 
 **Check online/offline status:**
 ```bash
-sqlite3 /var/run/cmonit/cmonit.db "SELECT hostname, CAST((strftime('%s', 'now') - strftime('%s', last_seen)) AS INTEGER) as seconds_ago FROM hosts ORDER BY hostname"
+sqlite3 /var/db/cmonit/cmonit.db "SELECT hostname, CAST((strftime('%s', 'now') - strftime('%s', last_seen)) AS INTEGER) as seconds_ago FROM hosts ORDER BY hostname"
 ```
 
 **With online/offline indicator:**
 ```bash
-sqlite3 /var/run/cmonit/cmonit.db "
+sqlite3 /var/db/cmonit/cmonit.db "
 SELECT
   hostname,
   CAST((strftime('%s', 'now') - strftime('%s', last_seen)) AS INTEGER) as seconds_ago,
@@ -66,7 +68,7 @@ ORDER BY seconds_ago DESC"
 
 **Count hosts by OS:**
 ```bash
-sqlite3 /var/run/cmonit/cmonit.db "
+sqlite3 /var/db/cmonit/cmonit.db "
 SELECT
   COUNT(*) as total,
   COUNT(CASE WHEN os_name = 'FreeBSD' THEN 1 END) as freebsd,
@@ -79,7 +81,7 @@ FROM hosts"
 
 **List all services for a specific host:**
 ```bash
-sqlite3 /var/run/cmonit/cmonit.db "
+sqlite3 /var/db/cmonit/cmonit.db "
 SELECT name, type, status, monitor, last_seen
 FROM services
 WHERE host_id = 'your-host-id'
@@ -88,7 +90,7 @@ ORDER BY name"
 
 **Count services per host:**
 ```bash
-sqlite3 /var/run/cmonit/cmonit.db "
+sqlite3 /var/db/cmonit/cmonit.db "
 SELECT host_id, COUNT(*) as service_count
 FROM services
 GROUP BY host_id
@@ -97,7 +99,7 @@ ORDER BY service_count DESC"
 
 **Find services with issues (status != 0):**
 ```bash
-sqlite3 /var/run/cmonit/cmonit.db "
+sqlite3 /var/db/cmonit/cmonit.db "
 SELECT h.hostname, s.name, s.type, s.status
 FROM services s
 JOIN hosts h ON s.host_id = h.id
@@ -109,7 +111,7 @@ ORDER BY h.hostname, s.name"
 
 **Count availability records per host:**
 ```bash
-sqlite3 /var/run/cmonit/cmonit.db "
+sqlite3 /var/db/cmonit/cmonit.db "
 SELECT host_id, COUNT(*) as record_count
 FROM host_availability
 GROUP BY host_id
@@ -118,7 +120,7 @@ ORDER BY host_id"
 
 **Check availability time range for a specific host:**
 ```bash
-sqlite3 /var/run/cmonit/cmonit.db "
+sqlite3 /var/db/cmonit/cmonit.db "
 SELECT
   MIN(timestamp) as first_ts,
   MAX(timestamp) as last_ts,
@@ -131,7 +133,7 @@ WHERE host_id = 'your-host-id'"
 
 **Check total database size and record counts:**
 ```bash
-sqlite3 /var/run/cmonit/cmonit.db "
+sqlite3 /var/db/cmonit/cmonit.db "
 SELECT
   (SELECT COUNT(*) FROM hosts) as hosts,
   (SELECT COUNT(*) FROM services) as services,
@@ -179,9 +181,10 @@ sudo grep cmonit /var/log/daemon.log | tail -50
    ```
    **Solution**: Check database directory permissions:
    ```bash
-   sudo ls -ld /var/run/cmonit/
-   sudo mkdir -p /var/run/cmonit/
-   sudo chown nobody:wheel /var/run/cmonit/
+   sudo ls -ld /var/db/cmonit/
+   sudo mkdir -p /var/db/cmonit/
+   sudo chown nobody:wheel /var/db/cmonit/
+   sudo chmod 750 /var/db/cmonit/
    ```
 
 3. **Port already in use:**
@@ -228,7 +231,7 @@ sudo tail -f /var/log/daemon.log | grep "Stored status"
 
 **Verify host exists in database:**
 ```bash
-sqlite3 /var/run/cmonit/cmonit.db "SELECT hostname, last_seen FROM hosts"
+sqlite3 /var/db/cmonit/cmonit.db "SELECT hostname, last_seen FROM hosts"
 ```
 
 **Check for database errors:**
@@ -244,18 +247,18 @@ sudo grep -E "ERROR|FATAL" /var/log/daemon.log | grep cmonit | tail -20
 
 **Check database size:**
 ```bash
-du -h /var/run/cmonit/cmonit.db*
+du -h /var/db/cmonit/cmonit.db*
 ```
 
 **Check metric count:**
 ```bash
-sqlite3 /var/run/cmonit/cmonit.db "SELECT COUNT(*) FROM metrics"
+sqlite3 /var/db/cmonit/cmonit.db "SELECT COUNT(*) FROM metrics"
 ```
 
 **Vacuum database (optimize):**
 ```bash
 sudo service cmonit stop
-sudo sqlite3 /var/run/cmonit/cmonit.db "VACUUM;"
+sudo sqlite3 /var/db/cmonit/cmonit.db "VACUUM;"
 sudo service cmonit start
 ```
 
@@ -289,7 +292,7 @@ read-only and times each of the status page's queries (`hosts`, `services`,
 go build -o qdiag ./cmd/qdiag
 CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64 go build -o qdiag ./cmd/qdiag  # cross-compile for the deploy target
 scp qdiag autobuilder.example.net:/tmp/qdiag
-ssh autobuilder.example.net '/tmp/qdiag -plan /var/run/cmonit/cmonit.db'
+ssh autobuilder.example.net '/tmp/qdiag -plan /var/db/cmonit/cmonit.db'
 ```
 `-plan` also prints `EXPLAIN QUERY PLAN` for each query and flags
 non-covering searches / full scans. This isolates which specific query is
@@ -299,7 +302,7 @@ query change), update `cmd/qdiag/main.go` to match.
 
 **4. Check the query plan for the slow query:**
 ```bash
-sqlite3 -readonly /var/run/cmonit/cmonit.db "EXPLAIN QUERY PLAN <query>;"
+sqlite3 -readonly /var/db/cmonit/cmonit.db "EXPLAIN QUERY PLAN <query>;"
 ```
 Look for `SEARCH ... USING INDEX` (non-covering — must fetch matching rows
 from the table to check an unindexed filter column) vs
@@ -313,8 +316,8 @@ so the scan becomes covering.
 **5. Check WAL health** (relevant on write-heavy hosts — e.g. many Monit
 agents polling in):
 ```bash
-ls -la /var/run/cmonit/cmonit.db-wal
-sudo -u nobody sqlite3 /var/run/cmonit/cmonit.db "PRAGMA wal_checkpoint(PASSIVE);"
+ls -la /var/db/cmonit/cmonit.db-wal
+sudo -u nobody sqlite3 /var/db/cmonit/cmonit.db "PRAGMA wal_checkpoint(PASSIVE);"
 ```
 The `-wal` file's on-disk size doesn't shrink after a passive checkpoint
 (SQLite reuses the space) — check the checkpoint's `(busy, log, checkpointed)`
@@ -346,12 +349,12 @@ sudo grep "availability recording" /var/log/daemon.log | tail -5
 
 **Verify availability records exist:**
 ```bash
-sqlite3 /var/run/cmonit/cmonit.db "SELECT COUNT(*) FROM host_availability"
+sqlite3 /var/db/cmonit/cmonit.db "SELECT COUNT(*) FROM host_availability"
 ```
 
 **Check for recent availability data:**
 ```bash
-sqlite3 /var/run/cmonit/cmonit.db "
+sqlite3 /var/db/cmonit/cmonit.db "
 SELECT host_id, COUNT(*) as records,
   datetime(MAX(timestamp), 'unixepoch') as last_record
 FROM host_availability
@@ -365,7 +368,7 @@ Hosts can only be deleted if they've been offline for more than 1 hour.
 
 **Check when host was last seen:**
 ```bash
-sqlite3 /var/run/cmonit/cmonit.db "
+sqlite3 /var/db/cmonit/cmonit.db "
 SELECT hostname,
   datetime(last_seen) as last_seen,
   CAST((strftime('%s', 'now') - strftime('%s', last_seen)) AS INTEGER) as seconds_offline
@@ -382,12 +385,12 @@ curl -X DELETE http://localhost:3000/admin/hosts/your-host-id
 
 **Check current schema version:**
 ```bash
-sqlite3 /var/run/cmonit/cmonit.db "SELECT version FROM schema_version ORDER BY version DESC LIMIT 1"
+sqlite3 /var/db/cmonit/cmonit.db "SELECT version FROM schema_version ORDER BY version DESC LIMIT 1"
 ```
 
 **Check schema migration history:**
 ```bash
-sqlite3 /var/run/cmonit/cmonit.db "SELECT version, applied_at FROM schema_version ORDER BY version"
+sqlite3 /var/db/cmonit/cmonit.db "SELECT version, applied_at FROM schema_version ORDER BY version"
 ```
 
 **Check migration logs:**
@@ -421,8 +424,8 @@ cat /usr/local/etc/cmonit.conf
 
 ```bash
 ls -l /usr/local/bin/cmonit
-ls -ld /var/run/cmonit/
-ls -l /var/run/cmonit/cmonit.db*
+ls -ld /var/db/cmonit/
+ls -l /var/db/cmonit/cmonit.db*
 ```
 
 ### Check Listening Ports
@@ -451,7 +454,7 @@ If you encounter issues not covered in this guide:
 ### Find hosts not reporting for X hours
 
 ```bash
-sqlite3 /var/run/cmonit/cmonit.db "
+sqlite3 /var/db/cmonit/cmonit.db "
 SELECT hostname,
   datetime(last_seen) as last_seen,
   CAST((strftime('%s', 'now') - strftime('%s', last_seen)) / 3600.0 AS REAL) as hours_offline
@@ -463,7 +466,7 @@ ORDER BY hours_offline DESC"
 ### Find hosts with most services
 
 ```bash
-sqlite3 /var/run/cmonit/cmonit.db "
+sqlite3 /var/db/cmonit/cmonit.db "
 SELECT h.hostname, COUNT(s.id) as service_count
 FROM hosts h
 LEFT JOIN services s ON h.id = s.host_id
@@ -474,7 +477,7 @@ ORDER BY service_count DESC"
 ### Check recent events
 
 ```bash
-sqlite3 /var/run/cmonit/cmonit.db "
+sqlite3 /var/db/cmonit/cmonit.db "
 SELECT datetime(created_at) as time, h.hostname, e.service_name, e.message
 FROM events e
 JOIN hosts h ON e.host_id = h.id

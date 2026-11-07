@@ -9,8 +9,8 @@
 //
 //	go build -o qdiag ./cmd/qdiag
 //	CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64 go build -o qdiag ./cmd/qdiag  # cross-compile for the deploy target
-//	./qdiag /var/run/cmonit/cmonit.db
-//	./qdiag -plan /var/run/cmonit/cmonit.db   # also print EXPLAIN QUERY PLAN for each query
+//	./qdiag /var/db/cmonit/cmonit.db
+//	./qdiag -plan /var/db/cmonit/cmonit.db   # also print EXPLAIN QUERY PLAN for each query
 package main
 
 import (

@@ -139,8 +139,8 @@ func main() {
 	tlsKey := flag.String("tls-key", "",
 		"TLS key file for both Web UI and Collector (empty = HTTP only)")
 
-	dbPath := flag.String("db", "/var/run/cmonit/cmonit.db",
-		"Database file path")
+	dbPath := flag.String("db", "/var/db/cmonit/cmonit.db",
+		"Database file path (keep it out of /var/run: FreeBSD deletes its files at boot)")
 
 	pidFile := flag.String("pidfile", "/var/run/cmonit/cmonit.pid",
 		"PID file path")
@@ -243,7 +243,7 @@ func main() {
 		*webPasswordFormat = config.MergeString(cfg.Web.PasswordFormat, *webPasswordFormat, "plain")
 		*tlsCert = config.MergeString(cfg.Web.Cert, *tlsCert, "")
 		*tlsKey = config.MergeString(cfg.Web.Key, *tlsKey, "")
-		*dbPath = config.MergeString(cfg.Storage.Database, *dbPath, "/var/run/cmonit/cmonit.db")
+		*dbPath = config.MergeString(cfg.Storage.Database, *dbPath, "/var/db/cmonit/cmonit.db")
 		*pidFile = config.MergeString(cfg.Storage.PidFile, *pidFile, "/var/run/cmonit/cmonit.pid")
 		*syslogFacility = config.MergeString(cfg.Logging.Syslog, *syslogFacility, "")
 		*debugFlag = config.MergeBool(cfg.Logging.Debug, *debugFlag)
@@ -368,10 +368,16 @@ func main() {
 	// Create database directory if it doesn't exist
 	//
 	// filepath.Dir() extracts the directory path from the full file path
-	// Example: "/var/run/cmonit/cmonit.db" -> "/var/run/cmonit"
+	// Example: "/var/db/cmonit/cmonit.db" -> "/var/db/cmonit"
 	dbDir := filepath.Dir(*dbPath)
 	if err := os.MkdirAll(dbDir, 0755); err != nil {
 		log.Fatalf("[FATAL] Failed to create database directory %s: %v", dbDir, err)
+	}
+
+	// FreeBSD's cleanvar rc script deletes every file under /var/run at boot,
+	// which silently resets the whole database.
+	if strings.HasPrefix(filepath.Clean(*dbPath), "/var/run/") {
+		log.Printf("[WARN] Database %s is under /var/run, which is cleared at boot and would erase all data; use a path such as /var/db/cmonit/cmonit.db", *dbPath)
 	}
 
 	// Create PID file directory if needed

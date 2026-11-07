@@ -191,7 +191,7 @@ See `cmonit.conf.sample` for a fully documented configuration file.
         Note: Collector inherits the IP address from this flag
 
   -db string
-        Database file path (default "/var/run/cmonit/cmonit.db")
+        Database file path (default "/var/db/cmonit/cmonit.db")
 
   -pidfile string
         PID file path (default "/var/run/cmonit/cmonit.pid")

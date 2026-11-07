@@ -311,7 +311,7 @@ cmonit supports two configuration methods:
 -config       Configuration file path (optional, TOML format)
 -collector    Collector port number (default "8080") - inherits IP from -listen
 -listen       Web UI listen address (default "localhost:3000")
--db           Database path (default "/var/run/cmonit/cmonit.db")
+-db           Database path (default "/var/db/cmonit/cmonit.db")
 -pidfile      PID file path (default "/var/run/cmonit/cmonit.pid")
 -syslog       Syslog facility (daemon, local0-7, empty for stderr)
 -web-user     HTTP Basic Auth username (empty = disabled)

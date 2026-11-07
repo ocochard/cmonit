@@ -79,8 +79,8 @@ key = ""
 # Storage Configuration
 [storage]
 # SQLite database file path
-# Default: "/var/run/cmonit/cmonit.db"
-database = "/var/run/cmonit/cmonit.db"
+# Default: "/var/db/cmonit/cmonit.db"
+database = "/var/db/cmonit/cmonit.db"
 
 # PID file path
 # Default: "/var/run/cmonit/cmonit.pid"

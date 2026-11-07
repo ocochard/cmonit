@@ -23,7 +23,9 @@
 #
 # Additional variables:
 # cmonit_pidfile (string):      PID file path (default: "/var/run/cmonit/cmonit.pid")
-# cmonit_db (string):           Database path (default: "/var/run/cmonit/cmonit.db")
+# cmonit_db (string):           Database path (default: "/var/db/cmonit/cmonit.db")
+#                               Do not put it under /var/run: FreeBSD deletes the files
+#                               there at every boot (cleanvar), which erases all data.
 #
 # For all other settings, use either cmonit_config or cmonit_flags.
 
@@ -39,7 +41,7 @@ load_rc_config $name
 : ${cmonit_config:=""}
 : ${cmonit_flags:=""}
 : ${cmonit_pidfile:="/var/run/cmonit/cmonit.pid"}
-: ${cmonit_db:="/var/run/cmonit/cmonit.db"}
+: ${cmonit_db:="/var/db/cmonit/cmonit.db"}
 
 pidfile="${cmonit_pidfile}"
 command="/usr/local/bin/${name}"
@@ -70,8 +72,8 @@ start_precmd="${name}_prestart"
 
 cmonit_prestart()
 {
-    # Create runtime directory (/var/run/cmonit) if it doesn't exist
-    # This directory typically holds both the database and PID file
+    # Runtime directory for the PID file. /var/run is emptied at boot, so it
+    # is recreated here on every start.
     runtime_dir="/var/run/cmonit"
     if [ ! -d "${runtime_dir}" ]; then
         mkdir -p "${runtime_dir}"
@@ -79,12 +81,19 @@ cmonit_prestart()
         chmod 755 "${runtime_dir}"
     fi
 
-    # Create database directory if it's different from runtime dir
+    # Database directory. It holds the Monit agent credentials, so it is not
+    # world-readable.
     db_dir=$(dirname "${cmonit_db}")
-    if [ "${db_dir}" != "${runtime_dir}" ] && [ ! -d "${db_dir}" ]; then
+    if [ ! -d "${db_dir}" ]; then
         mkdir -p "${db_dir}"
         chown ${cmonit_user} "${db_dir}"
+        chmod 750 "${db_dir}"
     fi
+    case "${cmonit_db}" in
+    /var/run/*)
+        warn "cmonit_db=${cmonit_db} is under /var/run, which is cleared at boot and would erase all data"
+        ;;
+    esac
 
     # Ensure database file is writable by cmonit_user
     if [ -f "${cmonit_db}" ]; then
